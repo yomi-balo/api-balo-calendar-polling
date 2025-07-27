@@ -24,9 +24,21 @@ ALGOLIA_API_KEY = os.getenv("ALGOLIA_API_KEY")
 ALGOLIA_INDEX_NAME = os.getenv("ALGOLIA_INDEX_NAME", "experts")
 DATABASE_URL = os.getenv("DATABASE_URL", "postgres://user:password@localhost:5432/calendar_db")
 
-# Initialize Algolia client
-algolia_client = SearchClient.create(ALGOLIA_APP_ID, ALGOLIA_API_KEY)
-algolia_index = algolia_client.init_index(ALGOLIA_INDEX_NAME)
+# Initialize Algolia client (with error handling)
+algolia_client = None
+algolia_index = None
+
+def init_algolia():
+    global algolia_client, algolia_index
+    if ALGOLIA_APP_ID and ALGOLIA_API_KEY:
+        try:
+            algolia_client = SearchClient.create(ALGOLIA_APP_ID, ALGOLIA_API_KEY)
+            algolia_index = algolia_client.init_index(ALGOLIA_INDEX_NAME)
+            logger.info("Algolia client initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize Algolia: {e}")
+    else:
+        logger.warning("Algolia credentials not provided - Algolia features will be disabled")
 
 
 # Tortoise ORM Models
@@ -112,6 +124,9 @@ async def lifespan(app: FastAPI):
         modules={'models': ['__main__']}  # Use current module
     )
     await Tortoise.generate_schemas()  # Create tables if they don't exist
+
+    # Initialize Algolia
+    init_algolia()
 
     # Start scheduler
     scheduler.add_job(
@@ -414,7 +429,8 @@ async def update_all_expert_availability():
             total_failed += len(expert_batch)
 
     # Update Algolia
-    if algolia_updates:
+    # Update Algolia
+    if algolia_updates and algolia_index:  # Check if algolia_index exists
         try:
             algolia_batch_size = 100
             algolia_batches = [algolia_updates[i:i + algolia_batch_size]
@@ -426,6 +442,8 @@ async def update_all_expert_availability():
             logger.info(f"Successfully updated {len(algolia_updates)} expert records in Algolia")
         except Exception as e:
             logger.error(f"Failed to update Algolia: {str(e)}")
+    elif algolia_updates and not algolia_index:
+        logger.warning("Algolia updates skipped - Algolia not configured")
 
     logger.info(f"Processing complete. Processed: {total_processed}, Failed: {total_failed}")
 
