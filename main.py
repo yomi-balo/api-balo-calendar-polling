@@ -22,11 +22,12 @@ CRONOFY_ACCESS_TOKEN = os.getenv("CRONOFY_ACCESS_TOKEN")
 ALGOLIA_APP_ID = os.getenv("ALGOLIA_APP_ID")
 ALGOLIA_API_KEY = os.getenv("ALGOLIA_API_KEY")
 ALGOLIA_INDEX_NAME = os.getenv("ALGOLIA_INDEX_NAME", "experts")
-DATABASE_URL = os.getenv("DATABASE_URL", "postgres://user:password@localhost:5432/calendar_db")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Initialize Algolia client (with error handling)
 algolia_client = None
 algolia_index = None
+
 
 def init_algolia():
     global algolia_client, algolia_index
@@ -119,11 +120,21 @@ async def update_expert_availability(expert_id: str, earliest_available_unix: Op
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup - Initialize Tortoise ORM
-    await Tortoise.init(
-        db_url=DATABASE_URL,
-        modules={'models': ['__main__']}  # Use current module
-    )
-    await Tortoise.generate_schemas()  # Create tables if they don't exist
+    if not DATABASE_URL:
+        logger.error("DATABASE_URL environment variable is not set!")
+        raise RuntimeError("DATABASE_URL is required")
+
+    # Fix Tortoise configuration for Railway deployment
+    try:
+        await Tortoise.init(
+            db_url=DATABASE_URL,
+            modules={'models': ['main']}  # Changed from '__main__' to 'main'
+        )
+        await Tortoise.generate_schemas()  # Create tables if they don't exist
+        logger.info("Database connection established successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        raise
 
     # Initialize Algolia
     init_algolia()
@@ -139,8 +150,12 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     logger.info("Calendar caching API started with 5-minute scheduler")
 
-    # Run initial update
-    await update_all_expert_availability()
+    # Run initial update (with error handling)
+    try:
+        await update_all_expert_availability()
+    except Exception as e:
+        logger.error(f"Initial availability update failed: {e}")
+        # Don't crash the app if initial update fails
 
     yield
 
@@ -250,7 +265,7 @@ async def delete_expert(expert_id: str):
         raise HTTPException(status_code=404, detail="Expert not found")
 
 
-# Core Functions (same as before)
+# Core Functions
 async def fetch_experts_availability_batch(experts: List[Expert]) -> List[AvailabilityData]:
     """Fetch availability data from Cronofy for multiple experts in one request"""
 
@@ -259,6 +274,17 @@ async def fetch_experts_availability_batch(experts: List[Expert]) -> List[Availa
 
     if total_calendar_ids > 15:
         raise ValueError(f"Total calendar IDs ({total_calendar_ids}) exceeds Cronofy's limit of 15 per request")
+
+    if not CRONOFY_ACCESS_TOKEN:
+        logger.warning("CRONOFY_ACCESS_TOKEN not set - returning empty availability")
+        return [
+            AvailabilityData(
+                expert_id=expert.expert_id,
+                earliest_available_unix=None,
+                last_updated=datetime.now(timezone.utc).isoformat()
+            )
+            for expert in experts
+        ]
 
     headers = {
         "Authorization": f"Bearer {CRONOFY_ACCESS_TOKEN}",
@@ -360,92 +386,95 @@ def find_earliest_available_slot(cronofy_data: dict) -> Optional[int]:
 
 async def update_all_expert_availability():
     """Fetch availability for all experts from database in batches and update Algolia"""
-    experts = await get_all_experts()
+    try:
+        experts = await get_all_experts()
 
-    if not experts:
-        logger.info("No experts found in database")
-        return
+        if not experts:
+            logger.info("No experts found in database")
+            return
 
-    logger.info(f"Updating availability for {len(experts)} experts from database using smart batching")
+        logger.info(f"Updating availability for {len(experts)} experts from database using smart batching")
 
-    algolia_updates = []
+        algolia_updates = []
 
-    # Smart batching logic
-    expert_batches = []
-    current_batch = []
-    current_calendar_count = 0
+        # Smart batching logic
+        expert_batches = []
+        current_batch = []
+        current_calendar_count = 0
 
-    for expert in experts:
-        expert_calendar_count = len(expert.cronofy_calendar_ids)
+        for expert in experts:
+            expert_calendar_count = len(expert.cronofy_calendar_ids)
 
-        if current_calendar_count + expert_calendar_count > 15:
-            if current_batch:
-                expert_batches.append(current_batch)
-            current_batch = [expert]
-            current_calendar_count = expert_calendar_count
-        else:
-            current_batch.append(expert)
-            current_calendar_count += expert_calendar_count
+            if current_calendar_count + expert_calendar_count > 15:
+                if current_batch:
+                    expert_batches.append(current_batch)
+                current_batch = [expert]
+                current_calendar_count = expert_calendar_count
+            else:
+                current_batch.append(expert)
+                current_calendar_count += expert_calendar_count
 
-    if current_batch:
-        expert_batches.append(current_batch)
+        if current_batch:
+            expert_batches.append(current_batch)
 
-    total_processed = 0
-    total_failed = 0
+        total_processed = 0
+        total_failed = 0
 
-    for batch_idx, expert_batch in enumerate(expert_batches):
-        try:
-            batch_calendar_count = sum(len(expert.cronofy_calendar_ids) for expert in expert_batch)
-            logger.info(f"Processing batch {batch_idx + 1}/{len(expert_batches)} with {len(expert_batch)} experts "
-                        f"and {batch_calendar_count} calendar IDs")
+        for batch_idx, expert_batch in enumerate(expert_batches):
+            try:
+                batch_calendar_count = sum(len(expert.cronofy_calendar_ids) for expert in expert_batch)
+                logger.info(f"Processing batch {batch_idx + 1}/{len(expert_batches)} with {len(expert_batch)} experts "
+                            f"and {batch_calendar_count} calendar IDs")
 
-            availability_results = await fetch_experts_availability_batch(expert_batch)
+                availability_results = await fetch_experts_availability_batch(expert_batch)
 
-            for expert, availability in zip(expert_batch, availability_results):
-                try:
-                    await update_expert_availability(
-                        expert.expert_id,
-                        availability.earliest_available_unix
-                    )
+                for expert, availability in zip(expert_batch, availability_results):
+                    try:
+                        await update_expert_availability(
+                            expert.expert_id,
+                            availability.earliest_available_unix
+                        )
 
-                    algolia_record = {
-                        "objectID": expert.expert_id,
-                        "earliest_available_unix": availability.earliest_available_unix,
-                        "availability_last_updated": availability.last_updated
-                    }
+                        algolia_record = {
+                            "objectID": expert.expert_id,
+                            "earliest_available_unix": availability.earliest_available_unix,
+                            "availability_last_updated": availability.last_updated
+                        }
 
-                    algolia_updates.append(algolia_record)
-                    total_processed += 1
+                        algolia_updates.append(algolia_record)
+                        total_processed += 1
 
-                except Exception as e:
-                    logger.error(f"Failed to process expert {expert.expert_id}: {str(e)}")
-                    total_failed += 1
+                    except Exception as e:
+                        logger.error(f"Failed to process expert {expert.expert_id}: {str(e)}")
+                        total_failed += 1
 
-            if batch_idx < len(expert_batches) - 1:
-                await asyncio.sleep(0.5)
+                if batch_idx < len(expert_batches) - 1:
+                    await asyncio.sleep(0.5)
 
-        except Exception as e:
-            logger.error(f"Failed to process batch {batch_idx + 1}: {str(e)}")
-            total_failed += len(expert_batch)
+            except Exception as e:
+                logger.error(f"Failed to process batch {batch_idx + 1}: {str(e)}")
+                total_failed += len(expert_batch)
 
-    # Update Algolia
-    # Update Algolia
-    if algolia_updates and algolia_index:  # Check if algolia_index exists
-        try:
-            algolia_batch_size = 100
-            algolia_batches = [algolia_updates[i:i + algolia_batch_size]
-                               for i in range(0, len(algolia_updates), algolia_batch_size)]
+        # Update Algolia
+        if algolia_updates and algolia_index:  # Check if algolia_index exists
+            try:
+                algolia_batch_size = 100
+                algolia_batches = [algolia_updates[i:i + algolia_batch_size]
+                                   for i in range(0, len(algolia_updates), algolia_batch_size)]
 
-            for algolia_batch in algolia_batches:
-                algolia_index.partial_update_objects(algolia_batch)
+                for algolia_batch in algolia_batches:
+                    algolia_index.partial_update_objects(algolia_batch)
 
-            logger.info(f"Successfully updated {len(algolia_updates)} expert records in Algolia")
-        except Exception as e:
-            logger.error(f"Failed to update Algolia: {str(e)}")
-    elif algolia_updates and not algolia_index:
-        logger.warning("Algolia updates skipped - Algolia not configured")
+                logger.info(f"Successfully updated {len(algolia_updates)} expert records in Algolia")
+            except Exception as e:
+                logger.error(f"Failed to update Algolia: {str(e)}")
+        elif algolia_updates and not algolia_index:
+            logger.warning(f"Algolia updates skipped for {len(algolia_updates)} records - Algolia not configured")
 
-    logger.info(f"Processing complete. Processed: {total_processed}, Failed: {total_failed}")
+        logger.info(f"Processing complete. Processed: {total_processed}, Failed: {total_failed}")
+
+    except Exception as e:
+        logger.error(f"Error in update_all_expert_availability: {str(e)}")
 
 
 # Scheduler setup
@@ -463,6 +492,9 @@ async def health_check():
             "experts_in_database": expert_count,
             "scheduler_running": scheduler.running if scheduler else False,
             "database_connected": True,
+            "database_url_set": bool(DATABASE_URL),
+            "cronofy_token_set": bool(CRONOFY_ACCESS_TOKEN),
+            "algolia_configured": bool(algolia_index),
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
     except Exception as e:
@@ -470,5 +502,6 @@ async def health_check():
             "status": "unhealthy",
             "error": str(e),
             "database_connected": False,
+            "database_url_set": bool(DATABASE_URL),
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
