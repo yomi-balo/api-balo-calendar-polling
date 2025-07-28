@@ -22,7 +22,12 @@ CRONOFY_ACCESS_TOKEN = os.getenv("CRONOFY_ACCESS_TOKEN")
 ALGOLIA_APP_ID = os.getenv("ALGOLIA_APP_ID")
 ALGOLIA_API_KEY = os.getenv("ALGOLIA_API_KEY")
 ALGOLIA_INDEX_NAME = os.getenv("ALGOLIA_INDEX_NAME", "experts")
+
+# Fix DATABASE_URL scheme for Tortoise ORM
 DATABASE_URL = os.getenv("DATABASE_URL")
+if DATABASE_URL and DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgres://", 1)
+    logger.info("Converted postgresql:// to postgres:// for Tortoise ORM compatibility")
 
 # Initialize Algolia client (with error handling)
 algolia_client = None
