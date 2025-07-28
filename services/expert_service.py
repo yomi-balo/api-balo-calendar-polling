@@ -50,31 +50,12 @@ class ExpertService:
         return expert_data
 
     @staticmethod
-    def _create_expert_batches(experts: List[Expert]) -> List[List[Expert]]:
-        """Create smart batches based on calendar count"""
-        expert_batches = []
-        current_batch = []
-        current_calendar_count = 0
-
-        for expert in experts:
-            expert_calendar_count = len(expert.calendar_ids)
-
-            if current_calendar_count + expert_calendar_count > settings.CRONOFY_MAX_CALENDARS_PER_REQUEST:
-                if current_batch:
-                    expert_batches.append(current_batch)
-                current_batch = [expert]
-                current_calendar_count = expert_calendar_count
-            else:
-                current_batch.append(expert)
-                current_calendar_count += expert_calendar_count
-
-        if current_batch:
-            expert_batches.append(current_batch)
-
-        return expert_batches
-
-    @staticmethod
-    async def update_all_expert_availability():
+    async def update_all_expert_availability(
+            duration: int = 60,
+            buffer_before: int = 0,
+            buffer_after: int = 0,
+            days_ahead: int = 30
+    ):
         """Fetch availability for all experts from database in batches and update Algolia"""
         try:
             experts = await Expert.get_all_ordered()
@@ -83,21 +64,28 @@ class ExpertService:
                 logger.info("No experts found in database")
                 return
 
-            logger.info(f"Updating availability for {len(experts)} experts from database using smart batching")
+            logger.info(f"Updating availability for {len(experts)} experts using new Cronofy slots API")
 
             algolia_updates = []
-            expert_batches = ExpertService._create_expert_batches(experts)
+
+            # Use new batching method - max 15 experts per batch
+            expert_batches = CronofyService.batch_experts(experts, batch_size=10)
             total_processed = 0
             total_failed = 0
 
             for batch_idx, expert_batch in enumerate(expert_batches):
                 try:
-                    batch_calendar_count = sum(len(expert.calendar_ids) for expert in expert_batch)
                     logger.info(
-                        f"Processing batch {batch_idx + 1}/{len(expert_batches)} with {len(expert_batch)} experts "
-                        f"and {batch_calendar_count} calendar IDs")
+                        f"Processing batch {batch_idx + 1}/{len(expert_batches)} with {len(expert_batch)} experts")
 
-                    availability_results = await CronofyService.fetch_experts_availability_batch(expert_batch)
+                    # Use new availability API with configurable parameters
+                    availability_results = await CronofyService.fetch_experts_availability_batch(
+                        expert_batch,
+                        duration=duration,
+                        buffer_before=buffer_before,
+                        buffer_after=buffer_after,
+                        days_ahead=days_ahead
+                    )
 
                     for expert, availability in zip(expert_batch, availability_results):
                         try:
@@ -119,6 +107,7 @@ class ExpertService:
                                 f"Failed to process expert {expert.expert_name} ({expert.bubble_uid}): {str(e)}")
                             total_failed += 1
 
+                    # Add delay between batches to be respectful to API
                     if batch_idx < len(expert_batches) - 1:
                         await asyncio.sleep(0.5)
 

@@ -31,10 +31,14 @@ class Settings:
     # Scheduler Configuration
     AVAILABILITY_UPDATE_INTERVAL_MINUTES: int = int(os.getenv("AVAILABILITY_UPDATE_INTERVAL_MINUTES", "5"))
 
-    # Cronofy Configuration
-    CRONOFY_API_URL: str = "https://api.cronofy.com/v1/free_busy"
-    CRONOFY_MAX_CALENDARS_PER_REQUEST: int = 15
-    CRONOFY_REQUEST_TIMEOUT: int = 60
+    CRONOFY_API_BASE: str = "https://api-au.cronofy.com/v1"
+    CRONOFY_MAX_EXPERTS_PER_REQUEST: int = 15  # Changed from 15 calendars to 10 experts
+    CRONOFY_REQUEST_TIMEOUT: int = 25
+    CRONOFY_DEFAULT_DURATION: int = int(os.getenv("CRONOFY_DEFAULT_DURATION", "60"))  # Meeting duration in minutes
+    CRONOFY_DEFAULT_BUFFER_BEFORE: int = int(
+        os.getenv("CRONOFY_DEFAULT_BUFFER_BEFORE", "0"))  # Buffer before in minutes
+    CRONOFY_DEFAULT_BUFFER_AFTER: int = int(os.getenv("CRONOFY_DEFAULT_BUFFER_AFTER", "0"))  # Buffer after in minutes
+    CRONOFY_DEFAULT_DAYS_AHEAD: int = int(os.getenv("CRONOFY_DEFAULT_DAYS_AHEAD", "30"))  # How many days to look ahead
 
     # Algolia Configuration
     ALGOLIA_BATCH_SIZE: int = 100
