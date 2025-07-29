@@ -105,7 +105,7 @@ class CronofyService:
                         error_data = response.json()
                     except:
                         error_data = {}
-                    logger.error(f"Cronofy API error: {response.status_code} {response.reason_phrase}, {error_data}")
+                    logger.error(f"Cronofy API error: {response.status_code} {response.reason_phrase}, {error_data}: {request_body} || {headers}")
                     raise Exception(f"Cronofy API error: {response.status_code} {response.reason_phrase}")
 
                 data = response.json()
