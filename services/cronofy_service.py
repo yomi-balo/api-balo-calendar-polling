@@ -101,6 +101,8 @@ class CronofyService:
                     except:
                         error_data = {}
 
+                    logger.debug(f"Cronofy Request Body: {request_body}")
+                    logger.debug(f"Cronofy Request Header: {headers}")
                     logger.error(f"Cronofy API error: {response.status_code} {response.reason_phrase}, {error_data}")
                     raise Exception(f"Cronofy API error: {response.status_code} {response.reason_phrase}")
 
