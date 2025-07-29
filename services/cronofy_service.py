@@ -90,13 +90,15 @@ class CronofyService:
 
         url = f"{CronofyService.CRONOFY_API_BASE}/availability"
 
+        logger.info(f"Cronofy Request Body 1: {request_body}")
+        logger.info(f"Cronofy Request Header 1: {headers}")
         try:
             # 25 second timeout
             async with httpx.AsyncClient(timeout=25.0) as client:
                 response = await client.post(url, headers=headers, json=request_body)
 
-                logger.debug(f"Cronofy Request Body 2: {request_body}")
-                logger.debug(f"Cronofy Request Header 2: {headers}")
+                logger.error(f"Cronofy Request Body 2: {request_body}")
+                logger.error(f"Cronofy Request Header 2: {headers}")
 
                 if not response.is_success:
                     try:
