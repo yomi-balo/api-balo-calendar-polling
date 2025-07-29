@@ -100,9 +100,6 @@ class CronofyService:
                         error_data = response.json()
                     except:
                         error_data = {}
-
-                    logger.debug(f"Cronofy Request Body: {request_body}")
-                    logger.debug(f"Cronofy Request Header: {headers}")
                     logger.error(f"Cronofy API error: {response.status_code} {response.reason_phrase}, {error_data}")
                     raise Exception(f"Cronofy API error: {response.status_code} {response.reason_phrase}")
 
@@ -139,6 +136,8 @@ class CronofyService:
             logger.error("Cronofy API request timed out after 25 seconds")
             raise Exception("Cronofy API request timed out")
         except Exception as e:
+            logger.debug(f"Cronofy Request Body: {request_body}")
+            logger.debug(f"Cronofy Request Header: {headers}")
             logger.error(f"Error fetching availability from Cronofy: {str(e)}")
             raise
 
