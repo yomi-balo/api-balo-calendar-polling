@@ -95,6 +95,9 @@ class CronofyService:
             async with httpx.AsyncClient(timeout=25.0) as client:
                 response = await client.post(url, headers=headers, json=request_body)
 
+                logger.debug(f"Cronofy Request Body 2: {request_body}")
+                logger.debug(f"Cronofy Request Header 2: {headers}")
+
                 if not response.is_success:
                     try:
                         error_data = response.json()
