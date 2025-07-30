@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 class CronofyService:
     """Service for handling Cronofy API interactions"""
 
-    # Use Australian API endpoint to match your production setup
-    CRONOFY_API_BASE = "https://api-au.cronofy.com/v1"
+    # Try global endpoint first, then Australian if needed
+    CRONOFY_API_BASE = "https://api.cronofy.com/v1"  # Changed from api-au.cronofy.com
 
     @staticmethod
     def create_availability_request_body(
@@ -25,7 +25,7 @@ class CronofyService:
             buffer_before: int = 0,
             buffer_after: int = 0
     ) -> Dict[str, Any]:
-        """Create availability request body"""
+        """Create availability request body matching your JS implementation"""
         return {
             "participants": [
                 {
@@ -58,16 +58,23 @@ class CronofyService:
         now = datetime.now(timezone.utc)
         end_time = now + timedelta(days=days_ahead)
 
-        return [
+        # Format timestamps to match Cronofy's expected format (no microseconds, use Z)
+        start_time_str = now.replace(microsecond=0).strftime('%Y-%m-%dT%H:%M:%SZ')
+        end_time_str = end_time.replace(microsecond=0).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        periods = [
             {
-                "start": now.isoformat(),
-                "end": end_time.isoformat()
+                "start": start_time_str,
+                "end": end_time_str
             }
         ]
 
+        logger.info(f"Created query periods: from {start_time_str} to {end_time_str} ({days_ahead} days)")
+        return periods
+
     @staticmethod
-    def batch_experts(experts: List[Expert], batch_size: int = 15) -> List[List[Expert]]:
-        """Batch experts into groups of specified size"""
+    def batch_experts(experts: List[Expert], batch_size: int = 10) -> List[List[Expert]]:
+        """Batch experts into groups of specified size (default 10 to match your JS)"""
         batches = []
         for i in range(0, len(experts), batch_size):
             batches.append(experts[i:i + batch_size])
@@ -78,7 +85,7 @@ class CronofyService:
             request_body: Dict[str, Any],
             original_experts: List[Expert] = None
     ) -> Dict[str, Any]:
-        """Fetch availability from Cronofy API"""
+        """Fetch availability from Cronofy API matching your JS implementation"""
 
         if not settings.CRONOFY_ACCESS_TOKEN:
             raise ValueError("CRONOFY_ACCESS_TOKEN is not configured")
@@ -90,25 +97,54 @@ class CronofyService:
 
         url = f"{CronofyService.CRONOFY_API_BASE}/availability"
 
-        logger.info(f"Cronofy Request Body 1: {request_body}")
-        logger.info(f"Cronofy Request Header 1: {headers}")
+        # LOG: Full request details
+        logger.info("=== CRONOFY API REQUEST DEBUG ===")
+        logger.info(f"URL: {url}")
+        logger.info(f"Method: POST")
+        logger.info(f"Headers: {dict(headers)}")  # This will show the full token
+        logger.info(f"Request Body: {request_body}")
+        logger.info("================================")
+
         try:
-            # 25 second timeout
+            # 25 second timeout to match your JS implementation
             async with httpx.AsyncClient(timeout=25.0) as client:
                 response = await client.post(url, headers=headers, json=request_body)
 
-                logger.error(f"Cronofy Request Body 2: {request_body}")
-                logger.error(f"Cronofy Request Header 2: {headers}")
+                # LOG: Response details
+                logger.info("=== CRONOFY API RESPONSE DEBUG ===")
+                logger.info(f"Status Code: {response.status_code}")
+                logger.info(f"Status Text: {response.reason_phrase}")
+                logger.info(f"Response Headers: {dict(response.headers)}")
+                logger.info(f"Response Body: {response.text}")
+                logger.info("==================================")
+
+                # If 401 on availability endpoint, log detailed error
+                if response.status_code == 401:
+                    logger.error("=== 401 UNAUTHORIZED DEBUG ===")
+                    logger.error(f"Full URL attempted: {url}")
+                    logger.error(f"Full token: {settings.CRONOFY_ACCESS_TOKEN}")
+                    logger.error(
+                        f"Token length: {len(settings.CRONOFY_ACCESS_TOKEN) if settings.CRONOFY_ACCESS_TOKEN else 0}")
+                    logger.error("Common causes:")
+                    logger.error("1. Invalid or expired token")
+                    logger.error("2. Token doesn't have availability permissions")
+                    logger.error("3. Wrong API region (try global vs Australian endpoint)")
+                    logger.error("4. Token format issue (should start with 'app_' or similar)")
+                    logger.error("==============================")
 
                 if not response.is_success:
                     try:
                         error_data = response.json()
                     except:
-                        error_data = {}
-                    logger.error(f"Cronofy API error: {response.status_code} {response.reason_phrase}, {error_data}: {request_body} || {headers}")
+                        error_data = {"raw_text": response.text}
+
+                    logger.error(f"Cronofy API error: {response.status_code} {response.reason_phrase}, {error_data}")
                     raise Exception(f"Cronofy API error: {response.status_code} {response.reason_phrase}")
 
                 data = response.json()
+
+                # LOG: Successful response summary
+                logger.info(f"SUCCESS: Got {len(data.get('available_slots', []))} available slots from Cronofy")
 
                 # Enrich with UIDs if we have original experts with bubble_uids
                 if data.get("available_slots") and original_experts:
@@ -118,6 +154,8 @@ class CronofyService:
                         for expert in original_experts
                         if expert.cronofy_id and expert.bubble_uid
                     }
+
+                    logger.info(f"Expert mapping: {sub_to_uid_map}")
 
                     # Only enrich with UIDs if we have mapping data
                     if sub_to_uid_map:
@@ -134,6 +172,7 @@ class CronofyService:
                             }
                             for slot in data["available_slots"]
                         ]
+                        logger.info("Enriched response with bubble UIDs")
 
                 return data
 
@@ -141,8 +180,6 @@ class CronofyService:
             logger.error("Cronofy API request timed out after 25 seconds")
             raise Exception("Cronofy API request timed out")
         except Exception as e:
-            logger.debug(f"Cronofy Request Body: {request_body}")
-            logger.debug(f"Cronofy Request Header: {headers}")
             logger.error(f"Error fetching availability from Cronofy: {str(e)}")
             raise
 
@@ -192,7 +229,7 @@ class CronofyService:
     ) -> List[AvailabilityData]:
         """Fetch availability data from Cronofy for multiple experts using new API"""
 
-        if len(experts) > 15:
+        if len(experts) > 10:  # Match your JS batch size
             raise ValueError(f"Cannot batch more than 10 experts per request (got {len(experts)})")
 
         if not settings.CRONOFY_ACCESS_TOKEN:
@@ -207,13 +244,41 @@ class CronofyService:
             ]
 
         try:
+            # LOG: Input parameters
+            logger.info("=== BATCH AVAILABILITY REQUEST DEBUG ===")
+            logger.info(f"Number of experts: {len(experts)}")
+            logger.info(f"Duration: {duration} minutes")
+            logger.info(f"Buffer before: {buffer_before} minutes")
+            logger.info(f"Buffer after: {buffer_after} minutes")
+            logger.info(f"Days ahead: {days_ahead}")
+
+            for i, expert in enumerate(experts):
+                logger.info(
+                    f"Expert {i + 1}: cronofy_id={expert.cronofy_id}, bubble_uid={expert.bubble_uid}, calendars={expert.calendar_ids}")
+
             # Create query periods
             query_periods = CronofyService.create_default_query_periods(days_ahead)
+            logger.info(f"Query periods: {query_periods}")
 
             # Create request body
             request_body = CronofyService.create_availability_request_body(
                 experts, query_periods, duration, buffer_before, buffer_after
             )
+
+            logger.info("=== REQUEST BODY STRUCTURE ===")
+            logger.info(f"Participants count: {len(request_body.get('participants', []))}")
+            if request_body.get('participants'):
+                members = request_body['participants'][0].get('members', [])
+                logger.info(f"Members in first participant group: {len(members)}")
+                for i, member in enumerate(members):
+                    logger.info(
+                        f"  Member {i + 1}: sub={member.get('sub')}, calendar_ids={member.get('calendar_ids')}, managed_availability={member.get('managed_availability')}")
+
+            logger.info(f"Required duration: {request_body.get('required_duration')}")
+            logger.info(f"Buffer settings: {request_body.get('buffer')}")
+            logger.info(f"Max results: {request_body.get('max_results')}")
+            logger.info(f"Response format: {request_body.get('response_format')}")
+            logger.info("==============================")
 
             # Fetch availability
             response_data = await CronofyService.fetch_cronofy_availability(request_body, experts)
@@ -224,6 +289,8 @@ class CronofyService:
                 earliest_available = CronofyService.find_earliest_available_slot_from_response(
                     response_data, expert.cronofy_id
                 )
+
+                logger.info(f"Expert {expert.cronofy_id} earliest available: {earliest_available}")
 
                 results.append(AvailabilityData(
                     expert_id=expert.cronofy_id,
