@@ -15,7 +15,7 @@ class CronofyService:
     """Service for handling Cronofy API interactions"""
 
     # Try global endpoint first, then Australian if needed
-    CRONOFY_API_BASE = "https://api.cronofy.com/v1"  # Changed from api-au.cronofy.com
+    CRONOFY_API_BASE = "https://api-au.cronofy.com/v1"
 
     @staticmethod
     def create_availability_request_body(
