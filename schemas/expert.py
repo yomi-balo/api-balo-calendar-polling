@@ -13,6 +13,11 @@ class ExpertCalendarList(BaseModel):
     """Schema for bulk expert calendar operations"""
     experts: List[ExpertCalendar]
 
+class ExpertUpdate(BaseModel):
+    """Schema for updating existing expert"""
+    cronofy_id: str
+    calendar_ids: List[str]
+
 class ExpertResponse(BaseModel):
     """Schema for expert details response"""
     expert_name: str

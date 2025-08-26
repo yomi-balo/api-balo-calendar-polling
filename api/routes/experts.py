@@ -7,7 +7,8 @@ from schemas.expert import (
     ExpertCalendarList,
     ExpertResponse,
     ExpertListResponse,
-    ExpertCreateResponse
+    ExpertCreateResponse,
+    ExpertUpdate
 )
 from schemas.availability import AvailabilityData
 from services.expert_service import ExpertService
@@ -57,6 +58,33 @@ async def get_expert_by_bubble_uid(bubble_uid: str):
     expert = await Expert.get_by_bubble_uid(bubble_uid)
     if not expert:
         raise HTTPException(status_code=404, detail="Expert not found")
+
+    return ExpertResponse(
+        expert_name=expert.expert_name,
+        cronofy_id=expert.cronofy_id,
+        calendar_ids=expert.calendar_ids,
+        bubble_uid=expert.bubble_uid,
+        created_at=expert.created_at,
+        updated_at=expert.updated_at,
+        last_availability_check=expert.last_availability_check,
+        earliest_available_unix=expert.earliest_available_unix
+    )
+
+
+@router.put("/bubble/{bubble_uid}", response_model=ExpertResponse)
+async def update_expert_by_bubble_uid(bubble_uid: str, update_data: ExpertUpdate):
+    """Update expert's cronofy_id and calendar_ids by Bubble UID"""
+    expert = await Expert.get_by_bubble_uid(bubble_uid)
+    if not expert:
+        raise HTTPException(status_code=404, detail="Expert not found")
+
+    # Update the expert's fields
+    expert.cronofy_id = update_data.cronofy_id
+    expert.calendar_ids = update_data.calendar_ids
+    await expert.save(update_fields=['cronofy_id', 'calendar_ids', 'updated_at'])
+
+    logger.info(
+        f"Updated expert {expert.expert_name} (bubble_uid: {bubble_uid}) - cronofy_id: {update_data.cronofy_id}, calendars: {len(update_data.calendar_ids)}")
 
     return ExpertResponse(
         expert_name=expert.expert_name,
@@ -131,7 +159,7 @@ async def get_expert_availability_by_cronofy_id(cronofy_id: str):
         raise HTTPException(status_code=500, detail="Error fetching availability")
 
 
-@router.delete("/{bubble_uid}")
+@router.delete("/bubble/{bubble_uid}")
 async def delete_expert_by_bubble_uid(bubble_uid: str):
     """Delete an expert from the database by Bubble UID"""
     expert = await Expert.get_by_bubble_uid(bubble_uid)
