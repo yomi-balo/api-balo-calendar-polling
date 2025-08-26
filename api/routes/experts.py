@@ -52,7 +52,7 @@ async def get_expert_calendars():
     )
 
 
-@router.get("/bubble/{bubble_uid}", response_model=ExpertResponse)
+@router.get("/{bubble_uid}", response_model=ExpertResponse)
 async def get_expert_by_bubble_uid(bubble_uid: str):
     """Get specific expert details by Bubble UID"""
     expert = await Expert.get_by_bubble_uid(bubble_uid)
@@ -71,7 +71,7 @@ async def get_expert_by_bubble_uid(bubble_uid: str):
     )
 
 
-@router.put("/bubble/{bubble_uid}", response_model=ExpertResponse)
+@router.put("/{bubble_uid}", response_model=ExpertResponse)
 async def update_expert_by_bubble_uid(bubble_uid: str, update_data: ExpertUpdate):
     """Update expert's cronofy_id and calendar_ids by Bubble UID"""
     expert = await Expert.get_by_bubble_uid(bubble_uid)
@@ -117,7 +117,7 @@ async def get_expert_by_cronofy_id(cronofy_id: str):
     )
 
 
-@router.get("/bubble/{bubble_uid}/availability", response_model=AvailabilityData)
+@router.get("/{bubble_uid}/availability", response_model=AvailabilityData)
 async def get_expert_availability_by_bubble_uid(bubble_uid: str):
     """Get cached availability for a specific expert by Bubble UID or fetch fresh data"""
     expert = await Expert.get_by_bubble_uid(bubble_uid)
@@ -159,7 +159,7 @@ async def get_expert_availability_by_cronofy_id(cronofy_id: str):
         raise HTTPException(status_code=500, detail="Error fetching availability")
 
 
-@router.delete("/bubble/{bubble_uid}")
+@router.delete("/{bubble_uid}")
 async def delete_expert_by_bubble_uid(bubble_uid: str):
     """Delete an expert from the database by Bubble UID"""
     expert = await Expert.get_by_bubble_uid(bubble_uid)
