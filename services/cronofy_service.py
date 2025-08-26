@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 class CronofyService:
     """Service for handling Cronofy API interactions"""
 
-    # Try global endpoint first, then Australian if needed
     CRONOFY_API_BASE = "https://api-au.cronofy.com/v1"
 
     @staticmethod
@@ -25,7 +24,7 @@ class CronofyService:
             buffer_before: int = 0,
             buffer_after: int = 0
     ) -> Dict[str, Any]:
-        """Create availability request body matching your JS implementation"""
+        """Create availability request body"""
         return {
             "participants": [
                 {
@@ -74,7 +73,7 @@ class CronofyService:
 
     @staticmethod
     def batch_experts(experts: List[Expert], batch_size: int = 10) -> List[List[Expert]]:
-        """Batch experts into groups of specified size (default 10 to match your JS)"""
+        """Batch experts into groups of specified size (default 10)"""
         batches = []
         for i in range(0, len(experts), batch_size):
             batches.append(experts[i:i + batch_size])
@@ -85,7 +84,7 @@ class CronofyService:
             request_body: Dict[str, Any],
             original_experts: List[Expert] = None
     ) -> Dict[str, Any]:
-        """Fetch availability from Cronofy API matching your JS implementation"""
+        """Fetch availability from Cronofy API"""
 
         if not settings.CRONOFY_ACCESS_TOKEN:
             raise ValueError("CRONOFY_ACCESS_TOKEN is not configured")
@@ -334,30 +333,3 @@ class CronofyService:
             [dummy_expert], duration, buffer_before, buffer_after
         )
         return batch_results[0]
-
-    # Keep the old method for backward compatibility but mark as deprecated
-    @staticmethod
-    def find_earliest_available_slot(cronofy_data: dict) -> Optional[int]:
-        """
-        DEPRECATED: Process Cronofy free/busy data to find the earliest available time slot
-        Use find_earliest_available_slot_from_response instead
-        """
-        logger.warning("find_earliest_available_slot is deprecated, use find_earliest_available_slot_from_response")
-        try:
-            free_busy = cronofy_data.get("free_busy", [])
-
-            if not free_busy:
-                return None
-
-            for slot in free_busy:
-                if slot.get("free_busy_status") == "free":
-                    start_time = slot.get("start")
-                    if start_time:
-                        dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-                        return int(dt.timestamp())
-
-            return None
-
-        except Exception as e:
-            logger.error(f"Error processing availability data: {str(e)}")
-            return None

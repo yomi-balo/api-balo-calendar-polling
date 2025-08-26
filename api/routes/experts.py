@@ -131,7 +131,7 @@ async def get_expert_availability_by_cronofy_id(cronofy_id: str):
         raise HTTPException(status_code=500, detail="Error fetching availability")
 
 
-@router.delete("/bubble/{bubble_uid}")
+@router.delete("/{bubble_uid}")
 async def delete_expert_by_bubble_uid(bubble_uid: str):
     """Delete an expert from the database by Bubble UID"""
     expert = await Expert.get_by_bubble_uid(bubble_uid)
