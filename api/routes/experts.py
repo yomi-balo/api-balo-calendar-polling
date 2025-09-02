@@ -232,3 +232,51 @@ async def delete_expert_by_cronofy_id(
 ):
     """Delete an expert from the database by Cronofy ID"""
     return await delete_expert_by_identifier(cronofy_id, "cronofy_id", "cronofy_id")
+
+
+@router.post("/refresh-availability")
+async def refresh_all_availability():
+    """Manual trigger to refresh availability for all experts (for debugging)"""
+    try:
+        logger.info("Manual availability refresh triggered")
+        await ExpertService.update_all_expert_availability()
+        return {"message": "Availability refresh completed successfully"}
+    except Exception as e:
+        logger.error(f"Manual availability refresh failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Availability refresh failed: {str(e)}")
+
+
+@router.post("/refresh-availability/{bubble_uid}")
+async def refresh_single_expert_availability(
+    bubble_uid: str = Path(..., min_length=1, max_length=255, description="Expert's Bubble UID")
+):
+    """Manual trigger to refresh availability for a single expert (for debugging)"""
+    try:
+        expert = await Expert.get_by_bubble_uid(bubble_uid)
+        if not expert:
+            raise HTTPException(status_code=404, detail="Expert not found")
+        
+        logger.info(f"Manual availability refresh triggered for expert {expert.expert_name}")
+        
+        # Fetch fresh availability data
+        availability = await CronofyService.fetch_expert_availability(
+            expert.cronofy_id, expert.calendar_ids
+        )
+        
+        # Update database
+        old_timestamp = expert.earliest_available_unix
+        await expert.update_availability(availability.earliest_available_unix)
+        
+        return {
+            "message": f"Availability refresh completed for {expert.expert_name}",
+            "expert_name": expert.expert_name,
+            "old_timestamp": old_timestamp,
+            "new_timestamp": availability.earliest_available_unix,
+            "timestamp_changed": old_timestamp != availability.earliest_available_unix
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Manual availability refresh failed for {bubble_uid}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Availability refresh failed: {str(e)}")

@@ -135,6 +135,21 @@ class ExpertService:
 
                     for expert, availability in zip(expert_batch, availability_results):
                         try:
+                            # Log detailed info about each expert update
+                            old_timestamp = expert.earliest_available_unix
+                            new_timestamp = availability.earliest_available_unix
+                            
+                            structured_logger.info(
+                                "Processing expert availability update",
+                                expert_name=expert.expert_name,
+                                bubble_uid=expert.bubble_uid,
+                                cronofy_id=expert.cronofy_id,
+                                old_timestamp=old_timestamp,
+                                new_timestamp=new_timestamp,
+                                timestamp_changed=old_timestamp != new_timestamp,
+                                batch_index=batch_idx + 1
+                            )
+                            
                             await expert.update_availability(availability.earliest_available_unix)
 
                             algolia_record = {
@@ -149,8 +164,15 @@ class ExpertService:
                             total_processed += 1
 
                         except Exception as e:
-                            logger.error(
-                                f"Failed to process expert {expert.expert_name} ({expert.bubble_uid}): {str(e)}")
+                            structured_logger.error(
+                                "Failed to process expert availability",
+                                expert_name=expert.expert_name,
+                                bubble_uid=expert.bubble_uid,
+                                cronofy_id=expert.cronofy_id,
+                                error=str(e),
+                                error_type=type(e).__name__,
+                                batch_index=batch_idx + 1
+                            )
                             total_failed += 1
 
                     # Add delay between batches to be respectful to API

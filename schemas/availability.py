@@ -21,5 +21,6 @@ class HealthResponse(BaseModel):
     app_version: str
     uptime_seconds: Optional[float] = None
     last_availability_update: Optional[str] = None
+    recently_updated_experts: Optional[int] = None
     timestamp: str
     error: Optional[str] = None

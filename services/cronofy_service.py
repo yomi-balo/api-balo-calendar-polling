@@ -353,7 +353,13 @@ class CronofyService:
             return results
 
         except Exception as e:
-            logger.error(f"Error in batch availability fetch: {str(e)}")
+            structured_logger.error(
+                "Error in batch availability fetch",
+                error=str(e),
+                error_type=type(e).__name__,
+                expert_count=len(experts),
+                expert_cronofy_ids=[expert.cronofy_id for expert in experts]
+            )
             # Return empty availability for all experts on error
             return [
                 AvailabilityData(

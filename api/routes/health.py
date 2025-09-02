@@ -30,6 +30,11 @@ async def health_check():
         most_recent_expert = await Expert.all().order_by('-last_availability_check').first()
         last_update = most_recent_expert.last_availability_check.isoformat() if most_recent_expert and most_recent_expert.last_availability_check else None
         
+        # Check how many experts have been updated recently (within last hour)
+        from datetime import timedelta
+        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+        recently_updated_count = await Expert.filter(last_availability_check__gte=one_hour_ago).count() if most_recent_expert else 0
+        
         # Calculate uptime
         uptime = time.time() - _startup_time
 
@@ -46,6 +51,7 @@ async def health_check():
             app_version=settings.APP_VERSION,
             uptime_seconds=uptime,
             last_availability_update=last_update,
+            recently_updated_experts=recently_updated_count,
             timestamp=datetime.now(timezone.utc).isoformat()
         )
     except Exception as e:
@@ -60,6 +66,7 @@ async def health_check():
             cache_size=cache.size(),
             app_version=settings.APP_VERSION,
             uptime_seconds=time.time() - _startup_time,
+            recently_updated_experts=0,
             timestamp=datetime.now(timezone.utc).isoformat(),
             error=str(e)
         )
