@@ -3,6 +3,7 @@ import httpx
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
+import time
 
 from config.settings import settings
 from models.expert import Expert
@@ -16,6 +17,8 @@ class CronofyService:
 
     CRONOFY_API_BASE = "https://api-au.cronofy.com/v1"
     _client: Optional[httpx.AsyncClient] = None
+    _last_request_time: float = 0
+    _min_request_interval: float = 0.5  # 500ms between requests
 
     @classmethod
     async def get_client(cls) -> httpx.AsyncClient:
@@ -33,6 +36,19 @@ class CronofyService:
         if cls._client is not None:
             await cls._client.aclose()
             cls._client = None
+
+    @classmethod
+    async def _rate_limit(cls):
+        """Implement rate limiting for API calls"""
+        current_time = time.time()
+        time_since_last = current_time - cls._last_request_time
+        
+        if time_since_last < cls._min_request_interval:
+            wait_time = cls._min_request_interval - time_since_last
+            logger.debug(f"Rate limiting: waiting {wait_time:.2f}s before next API call")
+            await asyncio.sleep(wait_time)
+        
+        cls._last_request_time = time.time()
 
     @staticmethod
     def create_availability_request_body(
@@ -122,6 +138,9 @@ class CronofyService:
         logger.info("================================")
 
         try:
+            # Apply rate limiting before making the request
+            await CronofyService._rate_limit()
+            
             client = await CronofyService.get_client()
             response = await client.post(url, headers=headers, json=request_body)
 

@@ -16,6 +16,7 @@ class Expert(Model):
     updated_at = fields.DatetimeField(auto_now=True)
     last_availability_check = fields.DatetimeField(null=True)
     earliest_available_unix = fields.BigIntField(null=True)
+    version = fields.IntField(default=0)  # For optimistic locking
 
     class Meta:
         table = "experts"
@@ -36,12 +37,13 @@ class Expert(Model):
         )
 
         if not created:
-            # Update existing expert
+            # Update existing expert with version increment for optimistic locking
             expert.expert_name = expert_name
             expert.cronofy_id = cronofy_id
             expert.calendar_ids = calendar_ids
             expert.updated_at = datetime.now(timezone.utc)
-            await expert.save(update_fields=['expert_name', 'cronofy_id', 'calendar_ids', 'updated_at'])
+            expert.version += 1
+            await expert.save(update_fields=['expert_name', 'cronofy_id', 'calendar_ids', 'updated_at', 'version'])
 
         return expert
 
@@ -67,8 +69,27 @@ class Expert(Model):
         return await cls.all().order_by('-updated_at')
 
     async def update_availability(self, earliest_available_unix: Optional[int]):
-        """Update expert's availability data"""
-        await Expert.filter(bubble_uid=self.bubble_uid).update(
+        """Update expert's availability data with optimistic locking"""
+        current_version = self.version
+        rows_updated = await Expert.filter(
+            bubble_uid=self.bubble_uid,
+            version=current_version
+        ).update(
             last_availability_check=datetime.now(timezone.utc),
-            earliest_available_unix=earliest_available_unix
+            earliest_available_unix=earliest_available_unix,
+            version=current_version + 1
         )
+        
+        if rows_updated == 0:
+            # Record was modified by another process, refresh and retry once
+            await self.refresh_from_db()
+            await Expert.filter(bubble_uid=self.bubble_uid).update(
+                last_availability_check=datetime.now(timezone.utc),
+                earliest_available_unix=earliest_available_unix,
+                version=self.version + 1
+            )
+        else:
+            # Update local version to match database
+            self.version = current_version + 1
+            self.last_availability_check = datetime.now(timezone.utc)
+            self.earliest_available_unix = earliest_available_unix

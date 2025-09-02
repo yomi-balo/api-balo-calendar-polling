@@ -1,7 +1,8 @@
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Path
 from tortoise.exceptions import DoesNotExist
 from tortoise.transactions import in_transaction
+from pydantic import ValidationError
 
 from models.expert import Expert
 from schemas.expert import (
@@ -54,7 +55,9 @@ async def get_expert_calendars():
 
 
 @router.get("/{bubble_uid}", response_model=ExpertResponse)
-async def get_expert_by_bubble_uid(bubble_uid: str):
+async def get_expert_by_bubble_uid(
+    bubble_uid: str = Path(..., min_length=1, max_length=255, description="Expert's Bubble UID")
+):
     """Get specific expert details by Bubble UID"""
     expert = await Expert.get_by_bubble_uid(bubble_uid)
     if not expert:
@@ -73,7 +76,10 @@ async def get_expert_by_bubble_uid(bubble_uid: str):
 
 
 @router.put("/{bubble_uid}", response_model=ExpertResponse)
-async def update_expert_by_bubble_uid(bubble_uid: str, update_data: ExpertUpdate):
+async def update_expert_by_bubble_uid(
+    bubble_uid: str = Path(..., min_length=1, max_length=255, description="Expert's Bubble UID"),
+    update_data: ExpertUpdate = ...
+):
     """Update expert's cronofy_id and calendar_ids by Bubble UID"""
     try:
         async with in_transaction():
@@ -81,10 +87,11 @@ async def update_expert_by_bubble_uid(bubble_uid: str, update_data: ExpertUpdate
             if not expert:
                 raise HTTPException(status_code=404, detail="Expert not found")
 
-            # Update the expert's fields
+            # Update the expert's fields with version increment
             expert.cronofy_id = update_data.cronofy_id
             expert.calendar_ids = update_data.calendar_ids
-            await expert.save(update_fields=['cronofy_id', 'calendar_ids', 'updated_at'])
+            expert.version += 1
+            await expert.save(update_fields=['cronofy_id', 'calendar_ids', 'updated_at', 'version'])
 
             logger.info(
                 f"Updated expert {expert.expert_name} (bubble_uid: {bubble_uid}) - cronofy_id: {update_data.cronofy_id}, calendars: {len(update_data.calendar_ids)}")
@@ -108,7 +115,9 @@ async def update_expert_by_bubble_uid(bubble_uid: str, update_data: ExpertUpdate
 
 
 @router.get("/cronofy/{cronofy_id}", response_model=ExpertResponse)
-async def get_expert_by_cronofy_id(cronofy_id: str):
+async def get_expert_by_cronofy_id(
+    cronofy_id: str = Path(..., min_length=1, max_length=255, description="Expert's Cronofy ID")
+):
     """Get specific expert details by Cronofy ID"""
     expert = await Expert.get_by_cronofy_id(cronofy_id)
     if not expert:
@@ -127,7 +136,9 @@ async def get_expert_by_cronofy_id(cronofy_id: str):
 
 
 @router.get("/{bubble_uid}/availability", response_model=AvailabilityData)
-async def get_expert_availability_by_bubble_uid(bubble_uid: str):
+async def get_expert_availability_by_bubble_uid(
+    bubble_uid: str = Path(..., min_length=1, max_length=255, description="Expert's Bubble UID")
+):
     """Get cached availability for a specific expert by Bubble UID or fetch fresh data"""
     expert = await Expert.get_by_bubble_uid(bubble_uid)
     if not expert:
@@ -148,7 +159,9 @@ async def get_expert_availability_by_bubble_uid(bubble_uid: str):
 
 
 @router.get("/cronofy/{cronofy_id}/availability", response_model=AvailabilityData)
-async def get_expert_availability_by_cronofy_id(cronofy_id: str):
+async def get_expert_availability_by_cronofy_id(
+    cronofy_id: str = Path(..., min_length=1, max_length=255, description="Expert's Cronofy ID")
+):
     """Get cached availability for a specific expert by Cronofy ID or fetch fresh data"""
     expert = await Expert.get_by_cronofy_id(cronofy_id)
     if not expert:
@@ -169,7 +182,9 @@ async def get_expert_availability_by_cronofy_id(cronofy_id: str):
 
 
 @router.delete("/{bubble_uid}")
-async def delete_expert_by_bubble_uid(bubble_uid: str):
+async def delete_expert_by_bubble_uid(
+    bubble_uid: str = Path(..., min_length=1, max_length=255, description="Expert's Bubble UID")
+):
     """Delete an expert from the database by Bubble UID"""
     try:
         async with in_transaction():
@@ -190,7 +205,9 @@ async def delete_expert_by_bubble_uid(bubble_uid: str):
 
 
 @router.delete("/cronofy/{cronofy_id}")
-async def delete_expert_by_cronofy_id(cronofy_id: str):
+async def delete_expert_by_cronofy_id(
+    cronofy_id: str = Path(..., min_length=1, max_length=255, description="Expert's Cronofy ID")
+):
     """Delete an expert from the database by Cronofy ID"""
     try:
         async with in_transaction():
