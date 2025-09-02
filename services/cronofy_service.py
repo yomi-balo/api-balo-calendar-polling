@@ -9,8 +9,10 @@ from config.settings import settings
 from models.expert import Expert
 from schemas.availability import AvailabilityData
 from core.retry_utils import with_retry
+from core.logging_utils import get_structured_logger
 
 logger = logging.getLogger(__name__)
+structured_logger = get_structured_logger(__name__)
 
 
 class CronofyService:
@@ -294,17 +296,17 @@ class CronofyService:
             ]
 
         try:
-            # LOG: Input parameters
-            logger.info("=== BATCH AVAILABILITY REQUEST DEBUG ===")
-            logger.info(f"Number of experts: {len(experts)}")
-            logger.info(f"Duration: {duration} minutes")
-            logger.info(f"Buffer before: {buffer_before} minutes")
-            logger.info(f"Buffer after: {buffer_after} minutes")
-            logger.info(f"Days ahead: {days_ahead}")
-
-            for i, expert in enumerate(experts):
-                logger.info(
-                    f"Expert {i + 1}: cronofy_id={expert.cronofy_id}, bubble_uid={expert.bubble_uid}, calendars={expert.calendar_ids}")
+            # LOG: Input parameters with structured logging
+            structured_logger.info(
+                "Starting batch availability request",
+                batch_size=len(experts),
+                duration_minutes=duration,
+                buffer_before_minutes=buffer_before,
+                buffer_after_minutes=buffer_after,
+                days_ahead=days_ahead,
+                expert_cronofy_ids=[expert.cronofy_id for expert in experts],
+                expert_bubble_uids=[expert.bubble_uid for expert in experts]
+            )
 
             # Create query periods
             query_periods = CronofyService.create_default_query_periods(days_ahead)

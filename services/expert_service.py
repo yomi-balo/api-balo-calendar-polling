@@ -7,8 +7,10 @@ from models.expert import Expert
 from services.cronofy_service import CronofyService
 from services.algolia_service import algolia_service
 from config.settings import settings
+from core.logging_utils import get_structured_logger
 
 logger = logging.getLogger(__name__)
+structured_logger = get_structured_logger(__name__)
 
 
 class ExpertService:
@@ -60,7 +62,13 @@ class ExpertService:
                         await expert.save(update_fields=['expert_name', 'cronofy_id', 'calendar_ids', 'updated_at', 'version'])
 
                 updated_count = len(experts_to_create) + len(experts_to_update)
-                logger.info(f"Bulk upserted {updated_count} experts (created: {len(experts_to_create)}, updated: {len(experts_to_update)})")
+                structured_logger.info(
+                    "Bulk expert upsert completed",
+                    total_processed=updated_count,
+                    created_count=len(experts_to_create),
+                    updated_count=len(experts_to_update),
+                    operation="bulk_upsert"
+                )
                 return updated_count
 
         except Exception as e:

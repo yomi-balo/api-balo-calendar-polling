@@ -16,5 +16,10 @@ class HealthResponse(BaseModel):
     database_url_set: bool
     cronofy_token_set: bool
     algolia_configured: bool
+    cache_enabled: bool
+    cache_size: int
+    app_version: str
+    uptime_seconds: Optional[float] = None
+    last_availability_update: Optional[str] = None
     timestamp: str
     error: Optional[str] = None
