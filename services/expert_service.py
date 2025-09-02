@@ -22,17 +22,45 @@ class ExpertService:
 
         try:
             async with in_transaction():
-                updated_count = 0
-                for expert in expert_data:
-                    await Expert.upsert(
-                        expert["expert_name"],
-                        expert["cronofy_id"],
-                        expert["calendar_ids"],
-                        expert["bubble_uid"]
-                    )
-                    updated_count += 1
+                # Get existing experts by bubble_uid for efficient bulk operations
+                existing_bubble_uids = {expert["bubble_uid"] for expert in expert_data}
+                existing_experts = await Expert.filter(bubble_uid__in=list(existing_bubble_uids)).all()
+                existing_map = {expert.bubble_uid: expert for expert in existing_experts}
 
-                logger.info(f"Upserted {updated_count} expert calendar mappings to database")
+                experts_to_create = []
+                experts_to_update = []
+
+                for expert_data_item in expert_data:
+                    bubble_uid = expert_data_item["bubble_uid"]
+                    if bubble_uid in existing_map:
+                        # Update existing expert
+                        existing_expert = existing_map[bubble_uid]
+                        existing_expert.expert_name = expert_data_item["expert_name"]
+                        existing_expert.cronofy_id = expert_data_item["cronofy_id"]
+                        existing_expert.calendar_ids = expert_data_item["calendar_ids"]
+                        existing_expert.version += 1
+                        experts_to_update.append(existing_expert)
+                    else:
+                        # Create new expert
+                        experts_to_create.append(Expert(
+                            expert_name=expert_data_item["expert_name"],
+                            cronofy_id=expert_data_item["cronofy_id"],
+                            calendar_ids=expert_data_item["calendar_ids"],
+                            bubble_uid=expert_data_item["bubble_uid"],
+                            version=0
+                        ))
+
+                # Bulk create new experts
+                if experts_to_create:
+                    await Expert.bulk_create(experts_to_create)
+
+                # Bulk update existing experts
+                if experts_to_update:
+                    for expert in experts_to_update:
+                        await expert.save(update_fields=['expert_name', 'cronofy_id', 'calendar_ids', 'updated_at', 'version'])
+
+                updated_count = len(experts_to_create) + len(experts_to_update)
+                logger.info(f"Bulk upserted {updated_count} experts (created: {len(experts_to_create)}, updated: {len(experts_to_update)})")
                 return updated_count
 
         except Exception as e:

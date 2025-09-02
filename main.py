@@ -7,6 +7,7 @@ from config.database import init_database, close_database
 from core.scheduler import scheduler_service
 from services.expert_service import ExpertService
 from services.cronofy_service import CronofyService
+from core.cache import cache
 from api.routes import experts, health
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,9 @@ async def lifespan(app: FastAPI):
     # Start background scheduler
     scheduler_service.start()
 
+    # Start cache cleanup task
+    await cache.start_cleanup_task()
+
     # Run initial availability update
     try:
         await ExpertService.update_all_expert_availability()
@@ -37,6 +41,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down application")
     scheduler_service.shutdown()
+    await cache.stop_cleanup_task()
     await CronofyService.close_client()
     await close_database()
     logger.info("Application shutdown complete")

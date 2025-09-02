@@ -15,6 +15,8 @@ from schemas.expert import (
 from schemas.availability import AvailabilityData
 from services.expert_service import ExpertService
 from services.cronofy_service import CronofyService
+from core.expert_utils import delete_expert_by_identifier
+from core.cache import cache
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,9 @@ async def set_expert_calendars(data: ExpertCalendarList):
 
     updated_count = await ExpertService.bulk_upsert_experts(expert_data)
 
+    # Invalidate cache after bulk upsert
+    await cache.delete("all_experts_list")
+
     return ExpertCreateResponse(
         message=f"Successfully processed {updated_count} expert calendar mappings",
         updated_count=updated_count
@@ -45,13 +50,27 @@ async def set_expert_calendars(data: ExpertCalendarList):
 
 @router.get("/calendars", response_model=ExpertListResponse)
 async def get_expert_calendars():
-    """Get all expert calendar mappings from database"""
+    """Get all expert calendar mappings from database with caching"""
+    cache_key = "all_experts_list"
+    
+    # Try to get from cache first
+    cached_data = await cache.get(cache_key)
+    if cached_data:
+        logger.debug("Returning cached expert list")
+        return cached_data
+    
+    # Not in cache, fetch from database
     expert_data = await ExpertService.get_all_experts_with_data()
-
-    return ExpertListResponse(
+    
+    response = ExpertListResponse(
         experts=expert_data,
         total_count=len(expert_data)
     )
+    
+    # Cache for 2 minutes (experts don't change frequently)
+    await cache.set(cache_key, response, ttl=120)
+    
+    return response
 
 
 @router.get("/{bubble_uid}", response_model=ExpertResponse)
@@ -95,6 +114,9 @@ async def update_expert_by_bubble_uid(
 
             logger.info(
                 f"Updated expert {expert.expert_name} (bubble_uid: {bubble_uid}) - cronofy_id: {update_data.cronofy_id}, calendars: {len(update_data.calendar_ids)}")
+
+            # Invalidate cache after update
+            await cache.delete("all_experts_list")
 
             return ExpertResponse(
                 expert_name=expert.expert_name,
@@ -186,22 +208,7 @@ async def delete_expert_by_bubble_uid(
     bubble_uid: str = Path(..., min_length=1, max_length=255, description="Expert's Bubble UID")
 ):
     """Delete an expert from the database by Bubble UID"""
-    try:
-        async with in_transaction():
-            expert = await Expert.get_by_bubble_uid(bubble_uid)
-            if not expert:
-                raise HTTPException(status_code=404, detail="Expert not found")
-
-            expert_name = expert.expert_name
-            await expert.delete()
-            logger.info(f"Deleted expert {expert_name} (bubble_uid: {bubble_uid}) from database")
-            return {"message": f"Expert {expert_name} deleted successfully"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to delete expert {bubble_uid}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error during deletion")
+    return await delete_expert_by_identifier(bubble_uid, "bubble_uid", "bubble_uid")
 
 
 @router.delete("/cronofy/{cronofy_id}")
@@ -209,19 +216,4 @@ async def delete_expert_by_cronofy_id(
     cronofy_id: str = Path(..., min_length=1, max_length=255, description="Expert's Cronofy ID")
 ):
     """Delete an expert from the database by Cronofy ID"""
-    try:
-        async with in_transaction():
-            expert = await Expert.get_by_cronofy_id(cronofy_id)
-            if not expert:
-                raise HTTPException(status_code=404, detail="Expert not found")
-
-            expert_name = expert.expert_name
-            await expert.delete()
-            logger.info(f"Deleted expert {expert_name} (cronofy_id: {cronofy_id}) from database")
-            return {"message": f"Expert {expert_name} deleted successfully"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to delete expert {cronofy_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error during deletion")
+    return await delete_expert_by_identifier(cronofy_id, "cronofy_id", "cronofy_id")

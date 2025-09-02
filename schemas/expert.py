@@ -2,6 +2,8 @@ from pydantic import BaseModel, validator, Field
 from typing import List, Optional
 from datetime import datetime
 
+from core.validators import validate_and_clean_string, validate_and_clean_calendar_ids
+
 class ExpertCalendar(BaseModel):
     """Schema for creating/updating expert calendar mappings"""
     expert_name: str = Field(..., min_length=1, max_length=255, description="Expert name")
@@ -11,31 +13,19 @@ class ExpertCalendar(BaseModel):
 
     @validator('expert_name')
     def expert_name_must_not_be_empty(cls, v):
-        if not v or not v.strip():
-            raise ValueError('Expert name cannot be empty')
-        return v.strip()
+        return validate_and_clean_string(v, 'Expert name')
 
     @validator('cronofy_id')
     def cronofy_id_must_be_valid(cls, v):
-        if not v or not v.strip():
-            raise ValueError('Cronofy ID cannot be empty')
-        return v.strip()
+        return validate_and_clean_string(v, 'Cronofy ID')
 
     @validator('bubble_uid')
     def bubble_uid_must_be_valid(cls, v):
-        if not v or not v.strip():
-            raise ValueError('Bubble UID cannot be empty')
-        return v.strip()
+        return validate_and_clean_string(v, 'Bubble UID')
 
     @validator('calendar_ids')
     def calendar_ids_must_be_valid(cls, v):
-        if not v:
-            raise ValueError('At least one calendar ID is required')
-        # Remove empty strings and duplicates
-        valid_ids = list(set([id.strip() for id in v if id and id.strip()]))
-        if not valid_ids:
-            raise ValueError('At least one valid calendar ID is required')
-        return valid_ids
+        return validate_and_clean_calendar_ids(v)
 
 class ExpertCalendarList(BaseModel):
     """Schema for bulk expert calendar operations"""
@@ -60,19 +50,11 @@ class ExpertUpdate(BaseModel):
 
     @validator('cronofy_id')
     def cronofy_id_must_be_valid(cls, v):
-        if not v or not v.strip():
-            raise ValueError('Cronofy ID cannot be empty')
-        return v.strip()
+        return validate_and_clean_string(v, 'Cronofy ID')
 
     @validator('calendar_ids')
     def calendar_ids_must_be_valid(cls, v):
-        if not v:
-            raise ValueError('At least one calendar ID is required')
-        # Remove empty strings and duplicates
-        valid_ids = list(set([id.strip() for id in v if id and id.strip()]))
-        if not valid_ids:
-            raise ValueError('At least one valid calendar ID is required')
-        return valid_ids
+        return validate_and_clean_calendar_ids(v)
 
 class ExpertResponse(BaseModel):
     """Schema for expert details response"""

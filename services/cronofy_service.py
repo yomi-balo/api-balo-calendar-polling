@@ -8,6 +8,7 @@ import time
 from config.settings import settings
 from models.expert import Expert
 from schemas.availability import AvailabilityData
+from core.retry_utils import with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,12 @@ class CronofyService:
         return batches
 
     @staticmethod
+    @with_retry(
+        max_retries=3,
+        base_delay=1.0,
+        max_delay=10.0,
+        exceptions=(httpx.TimeoutException, httpx.ConnectTimeout, httpx.HTTPStatusError)
+    )
     async def fetch_cronofy_availability(
             request_body: Dict[str, Any],
             original_experts: List[Expert] = None
@@ -173,7 +180,16 @@ class CronofyService:
                     error_data = {"raw_text": response.text}
 
                 logger.error(f"Cronofy API error: {response.status_code} {response.reason_phrase}, {error_data}")
-                raise Exception(f"Cronofy API error: {response.status_code} {response.reason_phrase}")
+                
+                # Raise specific HTTP error for retry mechanism
+                if response.status_code >= 500:
+                    raise httpx.HTTPStatusError(
+                        f"Server error: {response.status_code} {response.reason_phrase}",
+                        request=response.request,
+                        response=response
+                    )
+                else:
+                    raise Exception(f"Cronofy API error: {response.status_code} {response.reason_phrase}")
 
             data = response.json()
 
