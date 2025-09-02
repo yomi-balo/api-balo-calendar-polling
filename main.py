@@ -6,6 +6,7 @@ from config.settings import settings
 from config.database import init_database, close_database
 from core.scheduler import scheduler_service
 from services.expert_service import ExpertService
+from services.cronofy_service import CronofyService
 from api.routes import experts, health
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down application")
     scheduler_service.shutdown()
+    await CronofyService.close_client()
     await close_database()
     logger.info("Application shutdown complete")
 

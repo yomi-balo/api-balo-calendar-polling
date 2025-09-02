@@ -1,6 +1,7 @@
 import logging
 from fastapi import APIRouter, HTTPException
 from tortoise.exceptions import DoesNotExist
+from tortoise.transactions import in_transaction
 
 from models.expert import Expert
 from schemas.expert import (
@@ -74,28 +75,36 @@ async def get_expert_by_bubble_uid(bubble_uid: str):
 @router.put("/{bubble_uid}", response_model=ExpertResponse)
 async def update_expert_by_bubble_uid(bubble_uid: str, update_data: ExpertUpdate):
     """Update expert's cronofy_id and calendar_ids by Bubble UID"""
-    expert = await Expert.get_by_bubble_uid(bubble_uid)
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
+    try:
+        async with in_transaction():
+            expert = await Expert.get_by_bubble_uid(bubble_uid)
+            if not expert:
+                raise HTTPException(status_code=404, detail="Expert not found")
 
-    # Update the expert's fields
-    expert.cronofy_id = update_data.cronofy_id
-    expert.calendar_ids = update_data.calendar_ids
-    await expert.save(update_fields=['cronofy_id', 'calendar_ids', 'updated_at'])
+            # Update the expert's fields
+            expert.cronofy_id = update_data.cronofy_id
+            expert.calendar_ids = update_data.calendar_ids
+            await expert.save(update_fields=['cronofy_id', 'calendar_ids', 'updated_at'])
 
-    logger.info(
-        f"Updated expert {expert.expert_name} (bubble_uid: {bubble_uid}) - cronofy_id: {update_data.cronofy_id}, calendars: {len(update_data.calendar_ids)}")
+            logger.info(
+                f"Updated expert {expert.expert_name} (bubble_uid: {bubble_uid}) - cronofy_id: {update_data.cronofy_id}, calendars: {len(update_data.calendar_ids)}")
 
-    return ExpertResponse(
-        expert_name=expert.expert_name,
-        cronofy_id=expert.cronofy_id,
-        calendar_ids=expert.calendar_ids,
-        bubble_uid=expert.bubble_uid,
-        created_at=expert.created_at,
-        updated_at=expert.updated_at,
-        last_availability_check=expert.last_availability_check,
-        earliest_available_unix=expert.earliest_available_unix
-    )
+            return ExpertResponse(
+                expert_name=expert.expert_name,
+                cronofy_id=expert.cronofy_id,
+                calendar_ids=expert.calendar_ids,
+                bubble_uid=expert.bubble_uid,
+                created_at=expert.created_at,
+                updated_at=expert.updated_at,
+                last_availability_check=expert.last_availability_check,
+                earliest_available_unix=expert.earliest_available_unix
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update expert {bubble_uid}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error during update")
 
 
 @router.get("/cronofy/{cronofy_id}", response_model=ExpertResponse)
@@ -162,24 +171,40 @@ async def get_expert_availability_by_cronofy_id(cronofy_id: str):
 @router.delete("/{bubble_uid}")
 async def delete_expert_by_bubble_uid(bubble_uid: str):
     """Delete an expert from the database by Bubble UID"""
-    expert = await Expert.get_by_bubble_uid(bubble_uid)
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
+    try:
+        async with in_transaction():
+            expert = await Expert.get_by_bubble_uid(bubble_uid)
+            if not expert:
+                raise HTTPException(status_code=404, detail="Expert not found")
 
-    expert_name = expert.expert_name
-    await expert.delete()
-    logger.info(f"Deleted expert {expert_name} (bubble_uid: {bubble_uid}) from database")
-    return {"message": f"Expert {expert_name} deleted successfully"}
+            expert_name = expert.expert_name
+            await expert.delete()
+            logger.info(f"Deleted expert {expert_name} (bubble_uid: {bubble_uid}) from database")
+            return {"message": f"Expert {expert_name} deleted successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete expert {bubble_uid}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error during deletion")
 
 
 @router.delete("/cronofy/{cronofy_id}")
 async def delete_expert_by_cronofy_id(cronofy_id: str):
     """Delete an expert from the database by Cronofy ID"""
-    expert = await Expert.get_by_cronofy_id(cronofy_id)
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
+    try:
+        async with in_transaction():
+            expert = await Expert.get_by_cronofy_id(cronofy_id)
+            if not expert:
+                raise HTTPException(status_code=404, detail="Expert not found")
 
-    expert_name = expert.expert_name
-    await expert.delete()
-    logger.info(f"Deleted expert {expert_name} (cronofy_id: {cronofy_id}) from database")
-    return {"message": f"Expert {expert_name} deleted successfully"}
+            expert_name = expert.expert_name
+            await expert.delete()
+            logger.info(f"Deleted expert {expert_name} (cronofy_id: {cronofy_id}) from database")
+            return {"message": f"Expert {expert_name} deleted successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete expert {cronofy_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error during deletion")

@@ -15,6 +15,24 @@ class CronofyService:
     """Service for handling Cronofy API interactions"""
 
     CRONOFY_API_BASE = "https://api-au.cronofy.com/v1"
+    _client: Optional[httpx.AsyncClient] = None
+
+    @classmethod
+    async def get_client(cls) -> httpx.AsyncClient:
+        """Get or create shared HTTP client with connection pooling"""
+        if cls._client is None:
+            cls._client = httpx.AsyncClient(
+                timeout=25.0,
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
+            )
+        return cls._client
+
+    @classmethod
+    async def close_client(cls):
+        """Close shared HTTP client"""
+        if cls._client is not None:
+            await cls._client.aclose()
+            cls._client = None
 
     @staticmethod
     def create_availability_request_body(
@@ -96,84 +114,82 @@ class CronofyService:
 
         url = f"{CronofyService.CRONOFY_API_BASE}/availability"
 
-        # LOG: Full request details
+        # LOG: Request details (without sensitive data)
         logger.info("=== CRONOFY API REQUEST DEBUG ===")
         logger.info(f"URL: {url}")
         logger.info(f"Method: POST")
-        logger.info(f"Headers: {dict(headers)}")  # This will show the full token
         logger.info(f"Request Body: {request_body}")
         logger.info("================================")
 
         try:
-            # 25 second timeout to match your JS implementation
-            async with httpx.AsyncClient(timeout=25.0) as client:
-                response = await client.post(url, headers=headers, json=request_body)
+            client = await CronofyService.get_client()
+            response = await client.post(url, headers=headers, json=request_body)
 
-                # LOG: Response details
-                logger.info("=== CRONOFY API RESPONSE DEBUG ===")
-                logger.info(f"Status Code: {response.status_code}")
-                logger.info(f"Status Text: {response.reason_phrase}")
-                logger.info(f"Response Headers: {dict(response.headers)}")
-                logger.info(f"Response Body: {response.text}")
-                logger.info("==================================")
+            # LOG: Response details
+            logger.info("=== CRONOFY API RESPONSE DEBUG ===")
+            logger.info(f"Status Code: {response.status_code}")
+            logger.info(f"Status Text: {response.reason_phrase}")
+            logger.info(f"Response Headers: {dict(response.headers)}")
+            logger.info(f"Response Body: {response.text}")
+            logger.info("==================================")
 
-                # If 401 on availability endpoint, log detailed error
-                if response.status_code == 401:
-                    logger.error("=== 401 UNAUTHORIZED DEBUG ===")
-                    logger.error(f"Full URL attempted: {url}")
-                    logger.error(f"Full token: {settings.CRONOFY_ACCESS_TOKEN}")
-                    logger.error(
-                        f"Token length: {len(settings.CRONOFY_ACCESS_TOKEN) if settings.CRONOFY_ACCESS_TOKEN else 0}")
-                    logger.error("Common causes:")
-                    logger.error("1. Invalid or expired token")
-                    logger.error("2. Token doesn't have availability permissions")
-                    logger.error("3. Wrong API region (try global vs Australian endpoint)")
-                    logger.error("4. Token format issue (should start with 'app_' or similar)")
-                    logger.error("==============================")
+            # If 401 on availability endpoint, log error without token
+            if response.status_code == 401:
+                logger.error("=== 401 UNAUTHORIZED DEBUG ===")
+                logger.error(f"URL attempted: {url}")
+                logger.error(f"Token configured: {bool(settings.CRONOFY_ACCESS_TOKEN)}")
+                logger.error(
+                    f"Token length: {len(settings.CRONOFY_ACCESS_TOKEN) if settings.CRONOFY_ACCESS_TOKEN else 0}")
+                logger.error("Common causes:")
+                logger.error("1. Invalid or expired token")
+                logger.error("2. Token doesn't have availability permissions")
+                logger.error("3. Wrong API region (try global vs Australian endpoint)")
+                logger.error("4. Token format issue (should start with 'app_' or similar)")
+                logger.error("==============================")
 
-                if not response.is_success:
-                    try:
-                        error_data = response.json()
-                    except:
-                        error_data = {"raw_text": response.text}
+            if not response.is_success:
+                try:
+                    error_data = response.json()
+                except:
+                    error_data = {"raw_text": response.text}
 
-                    logger.error(f"Cronofy API error: {response.status_code} {response.reason_phrase}, {error_data}")
-                    raise Exception(f"Cronofy API error: {response.status_code} {response.reason_phrase}")
+                logger.error(f"Cronofy API error: {response.status_code} {response.reason_phrase}, {error_data}")
+                raise Exception(f"Cronofy API error: {response.status_code} {response.reason_phrase}")
 
-                data = response.json()
+            data = response.json()
 
-                # LOG: Successful response summary
-                logger.info(f"SUCCESS: Got {len(data.get('available_slots', []))} available slots from Cronofy")
+            # LOG: Successful response summary
+            logger.info(f"SUCCESS: Got {len(data.get('available_slots', []))} available slots from Cronofy")
 
-                # Enrich with UIDs if we have original experts with bubble_uids
-                if data.get("available_slots") and original_experts:
-                    # Create a map of cronofy_id (sub) to bubble_uid for quick lookup
-                    sub_to_uid_map = {
-                        expert.cronofy_id: expert.bubble_uid
-                        for expert in original_experts
-                        if expert.cronofy_id and expert.bubble_uid
-                    }
+            # Enrich with UIDs if we have original experts with bubble_uids
+            if data.get("available_slots") and original_experts:
+                # Create a map of cronofy_id (sub) to bubble_uid for quick lookup
+                sub_to_uid_map = {
+                    expert.cronofy_id: expert.bubble_uid
+                    for expert in original_experts
+                    if expert.cronofy_id and expert.bubble_uid
+                }
 
-                    logger.info(f"Expert mapping: {sub_to_uid_map}")
+                logger.info(f"Expert mapping: {sub_to_uid_map}")
 
-                    # Only enrich with UIDs if we have mapping data
-                    if sub_to_uid_map:
-                        data["available_slots"] = [
-                            {
-                                **slot,
-                                "participants": [
-                                    {
-                                        **participant,
-                                        "uid": sub_to_uid_map.get(participant.get("sub"))
-                                    }
-                                    for participant in slot.get("participants", [])
-                                ]
-                            }
-                            for slot in data["available_slots"]
-                        ]
-                        logger.info("Enriched response with bubble UIDs")
+                # Only enrich with UIDs if we have mapping data
+                if sub_to_uid_map:
+                    data["available_slots"] = [
+                        {
+                            **slot,
+                            "participants": [
+                                {
+                                    **participant,
+                                    "uid": sub_to_uid_map.get(participant.get("sub"))
+                                }
+                                for participant in slot.get("participants", [])
+                            ]
+                        }
+                        for slot in data["available_slots"]
+                    ]
+                    logger.info("Enriched response with bubble UIDs")
 
-                return data
+            return data
 
         except httpx.TimeoutException:
             logger.error("Cronofy API request timed out after 25 seconds")

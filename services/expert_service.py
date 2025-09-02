@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from typing import List
+from tortoise.transactions import in_transaction
 
 from models.expert import Expert
 from services.cronofy_service import CronofyService
@@ -15,19 +16,28 @@ class ExpertService:
 
     @staticmethod
     async def bulk_upsert_experts(expert_data: List[dict]) -> int:
-        """Bulk upsert experts"""
-        updated_count = 0
-        for expert in expert_data:
-            await Expert.upsert(
-                expert["expert_name"],
-                expert["cronofy_id"],
-                expert["calendar_ids"],
-                expert["bubble_uid"]
-            )
-            updated_count += 1
+        """Bulk upsert experts with transaction support"""
+        if not expert_data:
+            return 0
 
-        logger.info(f"Upserted {updated_count} expert calendar mappings to database")
-        return updated_count
+        try:
+            async with in_transaction():
+                updated_count = 0
+                for expert in expert_data:
+                    await Expert.upsert(
+                        expert["expert_name"],
+                        expert["cronofy_id"],
+                        expert["calendar_ids"],
+                        expert["bubble_uid"]
+                    )
+                    updated_count += 1
+
+                logger.info(f"Upserted {updated_count} expert calendar mappings to database")
+                return updated_count
+
+        except Exception as e:
+            logger.error(f"Transaction failed during bulk expert upsert: {str(e)}")
+            raise
 
     @staticmethod
     async def get_all_experts_with_data() -> List[dict]:
