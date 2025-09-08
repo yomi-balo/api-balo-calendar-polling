@@ -189,32 +189,43 @@ async def get_expert_availability_by_bubble_uid(
         )
 
         # Check if there was an error in the availability response
-        if availability.error:
+        if availability and hasattr(availability, 'error') and availability.error:
             # Log error to availability_errors table
-            await AvailabilityError.log_error(
-                bubble_uid=expert.bubble_uid,
-                expert_name=expert.expert_name,
-                cronofy_id=expert.cronofy_id,
-                error_reason=availability.error,
-                error_details=availability.error_details
-            )
+            try:
+                await AvailabilityError.log_error(
+                    bubble_uid=expert.bubble_uid,
+                    expert_name=expert.expert_name,
+                    cronofy_id=expert.cronofy_id,
+                    error_reason=availability.error,
+                    error_details=availability.error_details
+                )
+            except Exception as log_error:
+                logger.error(f"Failed to log availability error for {expert.bubble_uid}: {log_error}")
         else:
             # Success - clear any existing error and update database
-            await AvailabilityError.clear_error(expert.bubble_uid)
-            await expert.update_availability(availability.earliest_available_unix)
+            try:
+                await AvailabilityError.clear_error(expert.bubble_uid)
+            except Exception as clear_error:
+                logger.error(f"Failed to clear availability error for {expert.bubble_uid}: {clear_error}")
+            
+            if availability:
+                await expert.update_availability(availability.earliest_available_unix)
 
         return availability
     except Exception as e:
         logger.error(f"Error fetching availability for expert {expert.expert_name} ({bubble_uid}): {str(e)}")
         
         # Log processing error to availability_errors table
-        await AvailabilityError.log_error(
-            bubble_uid=expert.bubble_uid,
-            expert_name=expert.expert_name,
-            cronofy_id=expert.cronofy_id,
-            error_reason="Processing error",
-            error_details=f"{type(e).__name__}: {str(e)}"
-        )
+        try:
+            await AvailabilityError.log_error(
+                bubble_uid=expert.bubble_uid,
+                expert_name=expert.expert_name,
+                cronofy_id=expert.cronofy_id,
+                error_reason="Processing error",
+                error_details=f"{type(e).__name__}: {str(e)}"
+            )
+        except Exception as log_error:
+            logger.error(f"Failed to log processing error for {expert.bubble_uid}: {log_error}")
         
         raise HTTPException(status_code=500, detail="Error fetching availability")
 
@@ -234,32 +245,43 @@ async def get_expert_availability_by_cronofy_id(
         )
 
         # Check if there was an error in the availability response
-        if availability.error:
+        if availability and hasattr(availability, 'error') and availability.error:
             # Log error to availability_errors table
-            await AvailabilityError.log_error(
-                bubble_uid=expert.bubble_uid,
-                expert_name=expert.expert_name,
-                cronofy_id=expert.cronofy_id,
-                error_reason=availability.error,
-                error_details=availability.error_details
-            )
+            try:
+                await AvailabilityError.log_error(
+                    bubble_uid=expert.bubble_uid,
+                    expert_name=expert.expert_name,
+                    cronofy_id=expert.cronofy_id,
+                    error_reason=availability.error,
+                    error_details=availability.error_details
+                )
+            except Exception as log_error:
+                logger.error(f"Failed to log availability error for {expert.bubble_uid}: {log_error}")
         else:
             # Success - clear any existing error and update database
-            await AvailabilityError.clear_error(expert.bubble_uid)
-            await expert.update_availability(availability.earliest_available_unix)
+            try:
+                await AvailabilityError.clear_error(expert.bubble_uid)
+            except Exception as clear_error:
+                logger.error(f"Failed to clear availability error for {expert.bubble_uid}: {clear_error}")
+            
+            if availability:
+                await expert.update_availability(availability.earliest_available_unix)
 
         return availability
     except Exception as e:
         logger.error(f"Error fetching availability for expert {expert.expert_name} ({cronofy_id}): {str(e)}")
         
         # Log processing error to availability_errors table
-        await AvailabilityError.log_error(
-            bubble_uid=expert.bubble_uid,
-            expert_name=expert.expert_name,
-            cronofy_id=expert.cronofy_id,
-            error_reason="Processing error",
-            error_details=f"{type(e).__name__}: {str(e)}"
-        )
+        try:
+            await AvailabilityError.log_error(
+                bubble_uid=expert.bubble_uid,
+                expert_name=expert.expert_name,
+                cronofy_id=expert.cronofy_id,
+                error_reason="Processing error",
+                error_details=f"{type(e).__name__}: {str(e)}"
+            )
+        except Exception as log_error:
+            logger.error(f"Failed to log processing error for {expert.bubble_uid}: {log_error}")
         
         raise HTTPException(status_code=500, detail="Error fetching availability")
 
@@ -310,15 +332,19 @@ async def refresh_single_expert_availability(
         )
         
         # Check if there was an error in the availability response
-        if availability.error:
+        if availability and hasattr(availability, 'error') and availability.error:
             # Log error to availability_errors table
-            await AvailabilityError.log_error(
-                bubble_uid=expert.bubble_uid,
-                expert_name=expert.expert_name,
-                cronofy_id=expert.cronofy_id,
-                error_reason=availability.error,
-                error_details=availability.error_details
-            )
+            try:
+                await AvailabilityError.log_error(
+                    bubble_uid=expert.bubble_uid,
+                    expert_name=expert.expert_name,
+                    cronofy_id=expert.cronofy_id,
+                    error_reason=availability.error,
+                    error_details=availability.error_details
+                )
+            except Exception as log_error:
+                logger.error(f"Failed to log availability error for {expert.bubble_uid}: {log_error}")
+            
             return {
                 "message": f"Availability refresh failed for {expert.expert_name}",
                 "expert_name": expert.expert_name,
@@ -327,7 +353,11 @@ async def refresh_single_expert_availability(
             }
         else:
             # Success - clear any existing error and update database
-            await AvailabilityError.clear_error(expert.bubble_uid)
+            try:
+                await AvailabilityError.clear_error(expert.bubble_uid)
+            except Exception as clear_error:
+                logger.error(f"Failed to clear availability error for {expert.bubble_uid}: {clear_error}")
+            
             old_timestamp = expert.earliest_available_unix
             await expert.update_availability(availability.earliest_available_unix)
             
