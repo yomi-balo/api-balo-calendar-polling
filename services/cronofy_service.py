@@ -181,6 +181,24 @@ class CronofyService:
                 except:
                     error_data = {"raw_text": response.text}
 
+                # Enhanced logging for 422 errors to help with debugging
+                if response.status_code == 422:
+                    logger.error("=== 422 UNPROCESSABLE ENTITY DEBUG ===")
+                    logger.error(f"Request URL: {url}")
+                    logger.error(f"Expert count in batch: {len(original_experts) if original_experts else 'unknown'}")
+                    if original_experts:
+                        logger.error(f"Expert cronofy_ids: {[e.cronofy_id for e in original_experts]}")
+                        logger.error(f"Expert calendar_ids: {[e.calendar_ids for e in original_experts]}")
+                    logger.error(f"Request body keys: {list(request_body.keys()) if 'request_body' in locals() else 'unavailable'}")
+                    logger.error(f"Cronofy error response: {error_data}")
+                    logger.error("Common 422 causes:")
+                    logger.error("1. Invalid cronofy_id (expert account revoked/deleted)")
+                    logger.error("2. Invalid calendar_ids (calendar doesn't exist)")
+                    logger.error("3. Empty calendar_ids array")
+                    logger.error("4. Access token missing permissions for this expert")
+                    logger.error("5. Time period too far in future or invalid")
+                    logger.error("=====================================")
+                
                 logger.error(f"Cronofy API error: {response.status_code} {response.reason_phrase}, {error_data}")
                 
                 # Raise specific HTTP error for retry mechanism
@@ -355,7 +373,23 @@ class CronofyService:
                         expert_name=expert.expert_name,
                         success=False,
                         error_reason="Empty availability",
-                        error_details="No available slots found in the specified time period"
+                        error_details=f"""No available slots found for {expert.expert_name}.
+
+Search criteria:
+- Duration: {duration} minutes
+- Time period: Next {days_ahead} days
+- Buffer before: {buffer_before} minutes
+- Buffer after: {buffer_after} minutes
+- Calendar IDs: {expert.calendar_ids}
+
+Possible reasons:
+1. Expert's calendar is fully booked for the next {days_ahead} days
+2. Calendar has availability but no slots match the {duration}-minute duration requirement
+3. Buffer requirements ({buffer_before}min before + {buffer_after}min after) are too restrictive
+4. Calendar permissions changed (can see busy/free but not availability)
+5. Expert hasn't set up working hours in their calendar
+
+Recommendation: Check expert's calendar directly or adjust search criteria."""
                     ))
                 else:
                     # Success case
@@ -383,14 +417,68 @@ class CronofyService:
                 expert_cronofy_ids=[expert.cronofy_id for expert in experts]
             )
             # Return error results for all experts on API error
+            error_reason = "API error"
+            error_details = f"{type(e).__name__}: {str(e)}"
+            
+            # Provide more specific error reasons for common cases
+            if "422" in str(e):
+                error_reason = "Invalid expert data (422)"
+                expert_info = f"Expert: {experts[0].expert_name if experts else 'Unknown'}, Cronofy ID: {experts[0].cronofy_id if experts else 'Unknown'}, Calendar IDs: {experts[0].calendar_ids if experts else []}"
+                error_details = f"""422 Unprocessable Entity - Cronofy rejected the request.
+
+{expert_info}
+
+Common causes:
+1. Invalid cronofy_id (expert account deleted/revoked)
+2. Invalid calendar_ids (calendars don't exist or access revoked)  
+3. Empty calendar_ids array
+4. Access token missing permissions for this expert
+5. Time period invalid (too far future, malformed dates)
+
+Original error: {str(e)}"""
+            elif "401" in str(e):
+                error_reason = "Authentication error (401)" 
+                error_details = f"""401 Unauthorized - Access token issue.
+
+Possible causes:
+1. Token expired or invalid
+2. Token doesn't have availability permissions
+3. Wrong API region (using AU endpoint)
+4. Token format issue
+
+Original error: {str(e)}"""
+            elif "403" in str(e):
+                error_reason = "Permission denied (403)"
+                error_details = f"""403 Forbidden - Permission denied.
+
+Expert: {experts[0].expert_name if experts else 'Unknown'}
+Cronofy ID: {experts[0].cronofy_id if experts else 'Unknown'}
+
+Likely causes:
+1. Token lacks permissions for this specific expert
+2. Expert revoked calendar access
+3. Calendar sharing permissions changed
+
+Original error: {str(e)}"""
+            elif "429" in str(e):
+                error_reason = "Rate limit exceeded (429)"
+                error_details = f"""429 Too Many Requests - API rate limit hit.
+
+Current batch size: {len(experts)} experts
+Rate limit exceeded for Cronofy API.
+
+Solution: Reduce request frequency or batch size.
+
+Original error: {str(e)}"""
+            
             return [
                 AvailabilityResult(
                     expert_id=expert.cronofy_id,
                     bubble_uid=expert.bubble_uid,
                     expert_name=expert.expert_name,
                     success=False,
-                    error_reason="API error",
-                    error_details=f"{type(e).__name__}: {str(e)}"
+                    error_reason=error_reason,
+                    error_details=error_details
                 )
                 for expert in experts
             ]
