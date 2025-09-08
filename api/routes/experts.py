@@ -5,6 +5,7 @@ from tortoise.transactions import in_transaction
 from pydantic import ValidationError
 
 from models.expert import Expert
+from models.availability_error import AvailabilityError
 from schemas.expert import (
     ExpertCalendarList,
     ExpertResponse,
@@ -13,6 +14,7 @@ from schemas.expert import (
     ExpertUpdate
 )
 from schemas.availability import AvailabilityData
+from schemas.availability_error import AvailabilityErrorResponse, AvailabilityErrorListResponse
 from schemas.pagination import PaginationParams, PaginatedResponse
 from services.expert_service import ExpertService
 from services.cronofy_service import CronofyService
@@ -186,12 +188,34 @@ async def get_expert_availability_by_bubble_uid(
             expert.cronofy_id, expert.calendar_ids
         )
 
-        # Update database with fresh data
-        await expert.update_availability(availability.earliest_available_unix)
+        # Check if there was an error in the availability response
+        if availability.error:
+            # Log error to availability_errors table
+            await AvailabilityError.log_error(
+                bubble_uid=expert.bubble_uid,
+                expert_name=expert.expert_name,
+                cronofy_id=expert.cronofy_id,
+                error_reason=availability.error,
+                error_details=availability.error_details
+            )
+        else:
+            # Success - clear any existing error and update database
+            await AvailabilityError.clear_error(expert.bubble_uid)
+            await expert.update_availability(availability.earliest_available_unix)
 
         return availability
     except Exception as e:
         logger.error(f"Error fetching availability for expert {expert.expert_name} ({bubble_uid}): {str(e)}")
+        
+        # Log processing error to availability_errors table
+        await AvailabilityError.log_error(
+            bubble_uid=expert.bubble_uid,
+            expert_name=expert.expert_name,
+            cronofy_id=expert.cronofy_id,
+            error_reason="Processing error",
+            error_details=f"{type(e).__name__}: {str(e)}"
+        )
+        
         raise HTTPException(status_code=500, detail="Error fetching availability")
 
 
@@ -209,12 +233,34 @@ async def get_expert_availability_by_cronofy_id(
             expert.cronofy_id, expert.calendar_ids
         )
 
-        # Update database with fresh data
-        await expert.update_availability(availability.earliest_available_unix)
+        # Check if there was an error in the availability response
+        if availability.error:
+            # Log error to availability_errors table
+            await AvailabilityError.log_error(
+                bubble_uid=expert.bubble_uid,
+                expert_name=expert.expert_name,
+                cronofy_id=expert.cronofy_id,
+                error_reason=availability.error,
+                error_details=availability.error_details
+            )
+        else:
+            # Success - clear any existing error and update database
+            await AvailabilityError.clear_error(expert.bubble_uid)
+            await expert.update_availability(availability.earliest_available_unix)
 
         return availability
     except Exception as e:
         logger.error(f"Error fetching availability for expert {expert.expert_name} ({cronofy_id}): {str(e)}")
+        
+        # Log processing error to availability_errors table
+        await AvailabilityError.log_error(
+            bubble_uid=expert.bubble_uid,
+            expert_name=expert.expert_name,
+            cronofy_id=expert.cronofy_id,
+            error_reason="Processing error",
+            error_details=f"{type(e).__name__}: {str(e)}"
+        )
+        
         raise HTTPException(status_code=500, detail="Error fetching availability")
 
 
@@ -263,20 +309,114 @@ async def refresh_single_expert_availability(
             expert.cronofy_id, expert.calendar_ids
         )
         
-        # Update database
-        old_timestamp = expert.earliest_available_unix
-        await expert.update_availability(availability.earliest_available_unix)
-        
-        return {
-            "message": f"Availability refresh completed for {expert.expert_name}",
-            "expert_name": expert.expert_name,
-            "old_timestamp": old_timestamp,
-            "new_timestamp": availability.earliest_available_unix,
-            "timestamp_changed": old_timestamp != availability.earliest_available_unix
-        }
+        # Check if there was an error in the availability response
+        if availability.error:
+            # Log error to availability_errors table
+            await AvailabilityError.log_error(
+                bubble_uid=expert.bubble_uid,
+                expert_name=expert.expert_name,
+                cronofy_id=expert.cronofy_id,
+                error_reason=availability.error,
+                error_details=availability.error_details
+            )
+            return {
+                "message": f"Availability refresh failed for {expert.expert_name}",
+                "expert_name": expert.expert_name,
+                "error": availability.error,
+                "error_details": availability.error_details
+            }
+        else:
+            # Success - clear any existing error and update database
+            await AvailabilityError.clear_error(expert.bubble_uid)
+            old_timestamp = expert.earliest_available_unix
+            await expert.update_availability(availability.earliest_available_unix)
+            
+            return {
+                "message": f"Availability refresh completed for {expert.expert_name}",
+                "expert_name": expert.expert_name,
+                "old_timestamp": old_timestamp,
+                "new_timestamp": availability.earliest_available_unix,
+                "timestamp_changed": old_timestamp != availability.earliest_available_unix
+            }
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Manual availability refresh failed for {bubble_uid}: {str(e)}")
+        
+        # Log processing error to availability_errors table if we have the expert
+        if 'expert' in locals():
+            await AvailabilityError.log_error(
+                bubble_uid=expert.bubble_uid,
+                expert_name=expert.expert_name,
+                cronofy_id=expert.cronofy_id,
+                error_reason="Processing error",
+                error_details=f"{type(e).__name__}: {str(e)}"
+            )
+        
         raise HTTPException(status_code=500, detail=f"Availability refresh failed: {str(e)}")
+
+
+@router.get("/availability-errors", response_model=AvailabilityErrorListResponse)
+async def get_availability_errors():
+    """Get all current availability errors (experts that are currently failing)"""
+    try:
+        error_records = await AvailabilityError.get_all_errors()
+        
+        errors = [
+            AvailabilityErrorResponse(
+                bubble_uid=error.bubble_uid,
+                expert_name=error.expert_name,
+                cronofy_id=error.cronofy_id,
+                error_reason=error.error_reason,
+                error_details=error.error_details,
+                unix_timestamp=error.unix_timestamp,
+                melbourne_time=error.melbourne_time,
+                created_at=error.created_at,
+                updated_at=error.updated_at
+            )
+            for error in error_records
+        ]
+        
+        return AvailabilityErrorListResponse(
+            errors=errors,
+            total_count=len(errors),
+            message=f"Found {len(errors)} experts currently experiencing availability check failures"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error retrieving availability errors: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error retrieving availability errors")
+
+
+@router.get("/availability-errors/{bubble_uid}", response_model=AvailabilityErrorResponse)
+async def get_availability_error_by_bubble_uid(
+    bubble_uid: str = Path(..., min_length=1, max_length=255, description="Expert's Bubble UID")
+):
+    """Get availability error for a specific expert by Bubble UID"""
+    try:
+        error_record = await AvailabilityError.get_error_by_bubble_uid(bubble_uid)
+        
+        if not error_record:
+            raise HTTPException(
+                status_code=404, 
+                detail="No availability error found for this expert (expert may be working correctly)"
+            )
+        
+        return AvailabilityErrorResponse(
+            bubble_uid=error_record.bubble_uid,
+            expert_name=error_record.expert_name,
+            cronofy_id=error_record.cronofy_id,
+            error_reason=error_record.error_reason,
+            error_details=error_record.error_details,
+            unix_timestamp=error_record.unix_timestamp,
+            melbourne_time=error_record.melbourne_time,
+            created_at=error_record.created_at,
+            updated_at=error_record.updated_at
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving availability error for {bubble_uid}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error retrieving availability error")

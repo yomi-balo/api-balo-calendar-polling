@@ -6,6 +6,18 @@ class AvailabilityData(BaseModel):
     expert_id: str
     earliest_available_unix: Optional[int]
     last_updated: str
+    error: Optional[str] = None
+    error_details: Optional[str] = None
+
+class AvailabilityResult(BaseModel):
+    """Schema for availability result with success/error status"""
+    expert_id: str
+    bubble_uid: str
+    expert_name: str
+    success: bool
+    availability_data: Optional[AvailabilityData] = None
+    error_reason: Optional[str] = None
+    error_details: Optional[str] = None
 
 class HealthResponse(BaseModel):
     """Schema for health check response"""

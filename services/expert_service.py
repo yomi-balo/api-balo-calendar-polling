@@ -4,6 +4,7 @@ from typing import List
 from tortoise.transactions import in_transaction
 
 from models.expert import Expert
+from models.availability_error import AvailabilityError
 from services.cronofy_service import CronofyService
 from services.algolia_service import algolia_service
 from config.settings import settings
@@ -133,35 +134,59 @@ class ExpertService:
                         days_ahead=days_ahead
                     )
 
-                    for expert, availability in zip(expert_batch, availability_results):
+                    for expert, availability_result in zip(expert_batch, availability_results):
                         try:
-                            # Log detailed info about each expert update
-                            old_timestamp = expert.earliest_available_unix
-                            new_timestamp = availability.earliest_available_unix
-                            
-                            structured_logger.info(
-                                "Processing expert availability update",
-                                expert_name=expert.expert_name,
-                                bubble_uid=expert.bubble_uid,
-                                cronofy_id=expert.cronofy_id,
-                                old_timestamp=old_timestamp,
-                                new_timestamp=new_timestamp,
-                                timestamp_changed=old_timestamp != new_timestamp,
-                                batch_index=batch_idx + 1
-                            )
-                            
-                            await expert.update_availability(availability.earliest_available_unix)
+                            if availability_result.success:
+                                # Success case - clear any existing error log and update availability
+                                await AvailabilityError.clear_error(expert.bubble_uid)
+                                
+                                availability = availability_result.availability_data
+                                old_timestamp = expert.earliest_available_unix
+                                new_timestamp = availability.earliest_available_unix
+                                
+                                structured_logger.info(
+                                    "Processing expert availability update - SUCCESS",
+                                    expert_name=expert.expert_name,
+                                    bubble_uid=expert.bubble_uid,
+                                    cronofy_id=expert.cronofy_id,
+                                    old_timestamp=old_timestamp,
+                                    new_timestamp=new_timestamp,
+                                    timestamp_changed=old_timestamp != new_timestamp,
+                                    batch_index=batch_idx + 1
+                                )
+                                
+                                await expert.update_availability(availability.earliest_available_unix)
 
-                            algolia_record = {
-                                "objectID": expert.bubble_uid,  # Use bubble_uid as Algolia objectID
-                                "expert_name": expert.expert_name,
-                                "cronofy_id": expert.cronofy_id,
-                                "earliest_available_unix": availability.earliest_available_unix,
-                                "availability_last_updated": availability.last_updated
-                            }
+                                algolia_record = {
+                                    "objectID": expert.bubble_uid,  # Use bubble_uid as Algolia objectID
+                                    "expert_name": expert.expert_name,
+                                    "cronofy_id": expert.cronofy_id,
+                                    "earliest_available_unix": availability.earliest_available_unix,
+                                    "availability_last_updated": availability.last_updated
+                                }
 
-                            algolia_updates.append(algolia_record)
-                            total_processed += 1
+                                algolia_updates.append(algolia_record)
+                                total_processed += 1
+                            else:
+                                # Error case - log the error to the availability_errors table
+                                structured_logger.error(
+                                    "Expert availability check failed",
+                                    expert_name=expert.expert_name,
+                                    bubble_uid=expert.bubble_uid,
+                                    cronofy_id=expert.cronofy_id,
+                                    error_reason=availability_result.error_reason,
+                                    error_details=availability_result.error_details,
+                                    batch_index=batch_idx + 1
+                                )
+                                
+                                await AvailabilityError.log_error(
+                                    bubble_uid=expert.bubble_uid,
+                                    expert_name=expert.expert_name,
+                                    cronofy_id=expert.cronofy_id,
+                                    error_reason=availability_result.error_reason,
+                                    error_details=availability_result.error_details
+                                )
+                                total_failed += 1
 
                         except Exception as e:
                             structured_logger.error(
@@ -172,6 +197,15 @@ class ExpertService:
                                 error=str(e),
                                 error_type=type(e).__name__,
                                 batch_index=batch_idx + 1
+                            )
+                            
+                            # Log processing error to availability_errors table
+                            await AvailabilityError.log_error(
+                                bubble_uid=expert.bubble_uid,
+                                expert_name=expert.expert_name,
+                                cronofy_id=expert.cronofy_id,
+                                error_reason="Processing error",
+                                error_details=f"{type(e).__name__}: {str(e)}"
                             )
                             total_failed += 1
 

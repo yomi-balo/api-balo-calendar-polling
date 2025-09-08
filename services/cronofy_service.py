@@ -7,7 +7,7 @@ import time
 
 from config.settings import settings
 from models.expert import Expert
-from schemas.availability import AvailabilityData
+from schemas.availability import AvailabilityData, AvailabilityResult
 from core.retry_utils import with_retry
 from core.logging_utils import get_structured_logger
 
@@ -278,19 +278,22 @@ class CronofyService:
             buffer_before: int = 0,
             buffer_after: int = 0,
             days_ahead: int = 30
-    ) -> List[AvailabilityData]:
+    ) -> List[AvailabilityResult]:
         """Fetch availability data from Cronofy for multiple experts using new API"""
 
         if len(experts) > 10:  # Match your JS batch size
             raise ValueError(f"Cannot batch more than 10 experts per request (got {len(experts)})")
 
         if not settings.CRONOFY_ACCESS_TOKEN:
-            logger.warning("CRONOFY_ACCESS_TOKEN not set - returning empty availability")
+            logger.warning("CRONOFY_ACCESS_TOKEN not set - returning error for all experts")
             return [
-                AvailabilityData(
+                AvailabilityResult(
                     expert_id=expert.cronofy_id,
-                    earliest_available_unix=None,
-                    last_updated=datetime.now(timezone.utc).isoformat()
+                    bubble_uid=expert.bubble_uid,
+                    expert_name=expert.expert_name,
+                    success=False,
+                    error_reason="Configuration error",
+                    error_details="CRONOFY_ACCESS_TOKEN not configured"
                 )
                 for expert in experts
             ]
@@ -344,11 +347,30 @@ class CronofyService:
 
                 logger.info(f"Expert {expert.cronofy_id} earliest available: {earliest_available}")
 
-                results.append(AvailabilityData(
-                    expert_id=expert.cronofy_id,
-                    earliest_available_unix=earliest_available,
-                    last_updated=datetime.now(timezone.utc).isoformat()
-                ))
+                if earliest_available is None:
+                    # No availability found - this is considered an error condition
+                    results.append(AvailabilityResult(
+                        expert_id=expert.cronofy_id,
+                        bubble_uid=expert.bubble_uid,
+                        expert_name=expert.expert_name,
+                        success=False,
+                        error_reason="Empty availability",
+                        error_details="No available slots found in the specified time period"
+                    ))
+                else:
+                    # Success case
+                    availability_data = AvailabilityData(
+                        expert_id=expert.cronofy_id,
+                        earliest_available_unix=earliest_available,
+                        last_updated=datetime.now(timezone.utc).isoformat()
+                    )
+                    results.append(AvailabilityResult(
+                        expert_id=expert.cronofy_id,
+                        bubble_uid=expert.bubble_uid,
+                        expert_name=expert.expert_name,
+                        success=True,
+                        availability_data=availability_data
+                    ))
 
             return results
 
@@ -360,12 +382,15 @@ class CronofyService:
                 expert_count=len(experts),
                 expert_cronofy_ids=[expert.cronofy_id for expert in experts]
             )
-            # Return empty availability for all experts on error
+            # Return error results for all experts on API error
             return [
-                AvailabilityData(
+                AvailabilityResult(
                     expert_id=expert.cronofy_id,
-                    earliest_available_unix=None,
-                    last_updated=datetime.now(timezone.utc).isoformat()
+                    bubble_uid=expert.bubble_uid,
+                    expert_name=expert.expert_name,
+                    success=False,
+                    error_reason="API error",
+                    error_details=f"{type(e).__name__}: {str(e)}"
                 )
                 for expert in experts
             ]
@@ -386,9 +411,23 @@ class CronofyService:
                 self.cronofy_id = cronofy_id
                 self.calendar_ids = calendar_ids
                 self.bubble_uid = f"temp_{cronofy_id}"
+                self.expert_name = f"Expert_{cronofy_id}"
 
         dummy_expert = DummyExpert(cronofy_id, calendar_ids)
         batch_results = await CronofyService.fetch_experts_availability_batch(
             [dummy_expert], duration, buffer_before, buffer_after
         )
-        return batch_results[0]
+        result = batch_results[0]
+        
+        # Convert AvailabilityResult to AvailabilityData for backward compatibility
+        if result.success:
+            return result.availability_data
+        else:
+            # Return AvailabilityData with error information
+            return AvailabilityData(
+                expert_id=cronofy_id,
+                earliest_available_unix=None,
+                last_updated=datetime.now(timezone.utc).isoformat(),
+                error=result.error_reason,
+                error_details=result.error_details
+            )
