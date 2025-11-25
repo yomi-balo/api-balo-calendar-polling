@@ -111,8 +111,7 @@ async def init_database():
                     "maxsize": 5,  # Maximum connections (Railway free tier limit)
                     "max_queries": 50000,  # Max queries per connection before recycling
                     "max_inactive_connection_lifetime": 300,  # 5 minutes
-                    "connect_timeout": 60,
-                    "command_timeout": 30,
+                    "timeout": 30,  # Connection timeout in seconds
                 },
             }
             logger.info(f"Database pool configured: host={parsed.hostname}, max_connections=5")
