@@ -30,6 +30,8 @@ class Settings:
 
     # Scheduler Configuration
     AVAILABILITY_UPDATE_INTERVAL_MINUTES: int = int(os.getenv("AVAILABILITY_UPDATE_INTERVAL_MINUTES", "5"))
+    ERROR_RETRY_INTERVAL_MINUTES: int = int(os.getenv("ERROR_RETRY_INTERVAL_MINUTES", "10"))
+    ERROR_RETRY_MIN_AGE_MINUTES: int = int(os.getenv("ERROR_RETRY_MIN_AGE_MINUTES", "2"))
 
     CRONOFY_API_BASE: str = "https://api-au.cronofy.com/v1"
     CRONOFY_MAX_EXPERTS_PER_REQUEST: int = 15  # Changed from 15 calendars to 10 experts

@@ -18,6 +18,8 @@ from schemas.availability_error import AvailabilityErrorResponse, AvailabilityEr
 from schemas.pagination import PaginationParams, PaginatedResponse
 from services.expert_service import ExpertService
 from services.cronofy_service import CronofyService
+from services.error_retry_service import ErrorRetryService
+from services.algolia_service import algolia_service
 from core.expert_utils import delete_expert_by_identifier
 from core.cache import cache
 
@@ -361,6 +363,16 @@ async def refresh_single_expert_availability(
             old_timestamp = expert.earliest_available_unix
             await expert.update_availability(availability.earliest_available_unix)
             
+            # Update Algolia with fresh availability data
+            algolia_record = {
+                "objectID": expert.bubble_uid,
+                "expert_name": expert.expert_name,
+                "cronofy_id": expert.cronofy_id,
+                "earliest_available_unix": availability.earliest_available_unix,
+                "availability_last_updated": availability.last_updated
+            }
+            await algolia_service.update_expert_records([algolia_record])
+            
             return {
                 "message": f"Availability refresh completed for {expert.expert_name}",
                 "expert_name": expert.expert_name,
@@ -450,3 +462,19 @@ async def get_availability_error_by_bubble_uid(
     except Exception as e:
         logger.error(f"Error retrieving availability error for {bubble_uid}: {str(e)}")
         raise HTTPException(status_code=500, detail="Error retrieving availability error")
+
+
+@router.post("/retry-errors")
+async def retry_availability_errors():
+    """Manual trigger to retry experts with availability errors (for debugging)"""
+    try:
+        logger.info("Manual error retry triggered")
+        result = await ErrorRetryService.retry_failed_experts()
+        
+        return {
+            "message": "Error retry process completed",
+            "statistics": result
+        }
+    except Exception as e:
+        logger.error(f"Manual error retry failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error retry failed: {str(e)}")

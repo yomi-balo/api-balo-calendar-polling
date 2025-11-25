@@ -83,3 +83,13 @@ class AvailabilityError(Model):
             return await cls.get(bubble_uid=bubble_uid)
         except cls.DoesNotExist:
             return None
+
+    @classmethod
+    async def get_errors_ready_for_retry(cls, min_age_minutes: int = 2):
+        """Get availability errors that are ready for retry based on updated_at timestamp"""
+        from datetime import datetime, timezone, timedelta
+        
+        # Calculate cutoff time - errors older than min_age_minutes
+        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=min_age_minutes)
+        
+        return await cls.filter(updated_at__lt=cutoff_time).order_by('updated_at')

@@ -3,6 +3,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config.settings import settings
 from services.expert_service import ExpertService
+from services.error_retry_service import ErrorRetryService
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +15,8 @@ class SchedulerService:
         self.scheduler = AsyncIOScheduler()
 
     def start(self):
-        """Start the scheduler with availability update job"""
+        """Start the scheduler with availability update and error retry jobs"""
+        # Main availability update job
         self.scheduler.add_job(
             ExpertService.update_all_expert_availability,
             "interval",
@@ -22,9 +24,18 @@ class SchedulerService:
             id="update_availability",
             replace_existing=True
         )
+        
+        # Error retry job
+        self.scheduler.add_job(
+            ErrorRetryService.retry_failed_experts,
+            "interval",
+            minutes=settings.ERROR_RETRY_INTERVAL_MINUTES,
+            id="retry_failed_experts",
+            replace_existing=True
+        )
 
         self.scheduler.start()
-        logger.info(f"Scheduler started with {settings.AVAILABILITY_UPDATE_INTERVAL_MINUTES}-minute interval")
+        logger.info(f"Scheduler started with {settings.AVAILABILITY_UPDATE_INTERVAL_MINUTES}-minute availability updates and {settings.ERROR_RETRY_INTERVAL_MINUTES}-minute error retries")
 
     def shutdown(self):
         """Shutdown the scheduler"""
