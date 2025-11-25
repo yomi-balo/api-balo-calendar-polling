@@ -10,6 +10,7 @@ from models.expert import Expert
 from schemas.availability import AvailabilityData, AvailabilityResult
 from core.retry_utils import with_retry
 from core.logging_utils import get_structured_logger
+from core.constants import ERROR_EMPTY_AVAILABILITY
 
 logger = logging.getLogger(__name__)
 structured_logger = get_structured_logger(__name__)
@@ -400,7 +401,7 @@ class CronofyService:
                         bubble_uid=expert.bubble_uid,
                         expert_name=expert.expert_name,
                         success=False,
-                        error_reason="Empty availability",
+                        error_reason=ERROR_EMPTY_AVAILABILITY,
                         error_details=f"""No available slots found for {expert.expert_name}.
 
 Search criteria:

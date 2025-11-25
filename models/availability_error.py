@@ -2,6 +2,7 @@ from tortoise.models import Model
 from tortoise import fields
 from datetime import datetime, timezone
 import pytz
+from core.constants import ERROR_EMPTY_AVAILABILITY
 
 
 class AvailabilityError(Model):
@@ -10,7 +11,7 @@ class AvailabilityError(Model):
     bubble_uid = fields.CharField(max_length=255, pk=True)  # Primary key for uniqueness per expert
     expert_name = fields.CharField(max_length=255)
     cronofy_id = fields.CharField(max_length=255)
-    error_reason = fields.CharField(max_length=500)  # "API error", "Empty availability", etc.
+    error_reason = fields.CharField(max_length=500)  # "API error", ERROR_EMPTY_AVAILABILITY, etc.
     error_details = fields.TextField(null=True)  # Additional error context
     unix_timestamp = fields.BigIntField()  # Unix timestamp when error occurred
     melbourne_time = fields.CharField(max_length=100)  # Human-readable Melbourne time
@@ -92,4 +93,9 @@ class AvailabilityError(Model):
         # Calculate cutoff time - errors older than min_age_minutes
         cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=min_age_minutes)
         
-        return await cls.filter(updated_at__lt=cutoff_time).order_by('updated_at')
+        # Exclude "Empty availability" errors since they don't need retry - regular batch process handles them
+        return await cls.filter(
+            updated_at__lt=cutoff_time
+        ).exclude(
+            error_reason=ERROR_EMPTY_AVAILABILITY
+        ).order_by('updated_at')
