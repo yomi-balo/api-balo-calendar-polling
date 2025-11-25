@@ -43,9 +43,25 @@ class Settings:
     # Algolia Configuration
     ALGOLIA_BATCH_SIZE: int = 100
 
+    # Performance Configuration  
+    CACHE_DEFAULT_TTL: int = int(os.getenv("CACHE_DEFAULT_TTL", "300"))  # 5 minutes
+    CACHE_MAX_SIZE: int = int(os.getenv("CACHE_MAX_SIZE", "1000"))  # Max cached items
+    CACHE_MAX_MEMORY_MB: int = int(os.getenv("CACHE_MAX_MEMORY_MB", "50"))  # Railway optimized
+    
+    # Database Performance
+    DB_MIN_CONNECTIONS: int = int(os.getenv("DB_MIN_CONNECTIONS", "1"))
+    DB_MAX_CONNECTIONS: int = int(os.getenv("DB_MAX_CONNECTIONS", "5"))  # Railway optimized
+    DB_CONNECTION_TIMEOUT: int = int(os.getenv("DB_CONNECTION_TIMEOUT", "60"))
+    
+    # HTTP Client Performance  
+    HTTP_CONNECT_TIMEOUT: int = int(os.getenv("HTTP_CONNECT_TIMEOUT", "10"))
+    HTTP_READ_TIMEOUT: int = int(os.getenv("HTTP_READ_TIMEOUT", "25"))
+    HTTP_MAX_KEEPALIVE: int = int(os.getenv("HTTP_MAX_KEEPALIVE", "10"))
+    HTTP_MAX_CONNECTIONS: int = int(os.getenv("HTTP_MAX_CONNECTIONS", "20"))
+
     # App Configuration
     APP_NAME: str = "Calendar Caching API"
-    APP_VERSION: str = "1.0.0"
+    APP_VERSION: str = "1.1.0"  # Updated for performance improvements
 
     def validate(self) -> None:
         """Validate required settings"""

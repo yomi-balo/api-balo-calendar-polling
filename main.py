@@ -9,6 +9,7 @@ from services.expert_service import ExpertService
 from services.cronofy_service import CronofyService
 from core.cache import cache
 from api.routes import experts, health
+from core.middleware import PerformanceTrackingMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,14 @@ async def lifespan(app: FastAPI):
     # Start cache cleanup task
     await cache.start_cleanup_task()
 
+    # Initialize database performance optimizations
+    try:
+        from core.performance import DatabaseIndexOptimizer
+        await DatabaseIndexOptimizer.ensure_performance_indexes()
+        logger.info("Database performance indexes ensured")
+    except Exception as e:
+        logger.error(f"Database index optimization failed: {e}")
+
     # Run initial availability update
     try:
         await ExpertService.update_all_expert_availability()
@@ -38,13 +47,36 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
-    logger.info("Shutting down application")
-    scheduler_service.shutdown()
-    await cache.stop_cleanup_task()
-    await CronofyService.close_client()
-    await close_database()
-    logger.info("Application shutdown complete")
+    # Graceful Shutdown
+    logger.info("Starting graceful shutdown...")
+    
+    try:
+        # Stop scheduler first to prevent new tasks
+        logger.info("Stopping scheduler...")
+        scheduler_service.shutdown()
+        
+        # Stop cache cleanup task
+        logger.info("Stopping cache cleanup...")
+        await cache.stop_cleanup_task()
+        
+        # Close HTTP clients gracefully
+        logger.info("Closing HTTP clients...")
+        await CronofyService.close_client()
+        
+        # Close database connections last
+        logger.info("Closing database connections...")
+        await close_database()
+        
+        logger.info("Graceful shutdown completed successfully")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
+        # Force cleanup even if graceful shutdown fails
+        try:
+            await CronofyService.close_client()
+            await close_database()
+        except:
+            pass
+        logger.info("Forced shutdown completed")
 
 
 # Create FastAPI application
@@ -54,9 +86,16 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Add performance tracking middleware
+app.add_middleware(PerformanceTrackingMiddleware)
+
 # Include routers
 app.include_router(health.router)
 app.include_router(experts.router)
+
+# Add metrics router for performance monitoring
+from api.routes import metrics
+app.include_router(metrics.router)
 
 if __name__ == "__main__":
     import uvicorn

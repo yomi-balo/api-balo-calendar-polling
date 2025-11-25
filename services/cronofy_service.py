@@ -25,11 +25,25 @@ class CronofyService:
 
     @classmethod
     async def get_client(cls) -> httpx.AsyncClient:
-        """Get or create shared HTTP client with connection pooling"""
+        """Get or create shared HTTP client with optimized connection pooling"""
         if cls._client is None:
             cls._client = httpx.AsyncClient(
-                timeout=25.0,
-                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
+                timeout=httpx.Timeout(
+                    connect=10.0,
+                    read=25.0,
+                    write=10.0,
+                    pool=30.0
+                ),
+                limits=httpx.Limits(
+                    max_keepalive_connections=10,  # Increased for Railway
+                    max_connections=20,            # Increased for concurrent requests
+                    keepalive_expiry=30.0         # Keep connections alive for 30 seconds
+                ),
+                headers={
+                    "User-Agent": f"BaloCalendarAPI/1.0 Railway",
+                    "Accept": "application/json",
+                    "Connection": "keep-alive"
+                }
             )
         return cls._client
 
@@ -42,7 +56,7 @@ class CronofyService:
 
     @classmethod
     async def _rate_limit(cls):
-        """Implement rate limiting for API calls"""
+        """Implement adaptive rate limiting for API calls"""
         current_time = time.time()
         time_since_last = current_time - cls._last_request_time
         
@@ -52,6 +66,17 @@ class CronofyService:
             await asyncio.sleep(wait_time)
         
         cls._last_request_time = time.time()
+    
+    @classmethod
+    async def _adaptive_rate_limit(cls, response_status: int = 200):
+        """Adaptive rate limiting based on response status"""
+        if response_status == 429:  # Rate limited
+            cls._min_request_interval = min(cls._min_request_interval * 2, 5.0)  # Exponential backoff, max 5s
+            logger.warning(f"Rate limit hit, increasing interval to {cls._min_request_interval}s")
+        elif response_status == 200:  # Success
+            cls._min_request_interval = max(cls._min_request_interval * 0.9, 0.1)  # Gradual decrease, min 100ms
+        
+        await cls._rate_limit()
 
     @staticmethod
     def create_availability_request_body(
@@ -147,11 +172,14 @@ class CronofyService:
         logger.info("================================")
 
         try:
-            # Apply rate limiting before making the request
-            await CronofyService._rate_limit()
+            # Apply adaptive rate limiting before making the request
+            await CronofyService._adaptive_rate_limit()
             
             client = await CronofyService.get_client()
             response = await client.post(url, headers=headers, json=request_body)
+            
+            # Update rate limiting based on response
+            await CronofyService._adaptive_rate_limit(response.status_code)
 
             # LOG: Response details
             logger.info("=== CRONOFY API RESPONSE DEBUG ===")

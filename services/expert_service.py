@@ -57,10 +57,13 @@ class ExpertService:
                 if experts_to_create:
                     await Expert.bulk_create(experts_to_create)
 
-                # Bulk update existing experts
+                # Bulk update existing experts using raw SQL for better performance
                 if experts_to_update:
-                    for expert in experts_to_update:
-                        await expert.save(update_fields=['expert_name', 'cronofy_id', 'calendar_ids', 'updated_at', 'version'])
+                    # Use bulk_update for better performance
+                    await Expert.bulk_update(
+                        experts_to_update, 
+                        fields=['expert_name', 'cronofy_id', 'calendar_ids', 'updated_at', 'version']
+                    )
 
                 updated_count = len(experts_to_create) + len(experts_to_update)
                 structured_logger.info(

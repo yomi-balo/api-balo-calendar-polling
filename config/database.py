@@ -67,20 +67,66 @@ async def run_migrations():
 
 
 async def init_database():
-    """Initialize Tortoise ORM database connection"""
+    """Initialize Tortoise ORM database connection with optimized pooling"""
     settings.validate()
 
     try:
-        await Tortoise.init(
-            db_url=settings.DATABASE_URL,
-            modules={'models': ['models.expert', 'models.availability_error']}
-        )
+        # Optimized connection configuration for Railway PostgreSQL
+        config = {
+            "connections": {
+                "default": {
+                    "engine": "tortoise.backends.asyncpg",
+                    "credentials": {
+                        "database": None,  # Will be parsed from DATABASE_URL
+                        "host": None,
+                        "port": None,
+                        "user": None,
+                        "password": None,
+                    }
+                }
+            },
+            "apps": {
+                "models": {
+                    "models": ["models.expert", "models.availability_error"],
+                    "default_connection": "default",
+                }
+            },
+        }
+        
+        # Parse DATABASE_URL and add connection pooling settings
+        if settings.DATABASE_URL:
+            from urllib.parse import urlparse
+            parsed = urlparse(settings.DATABASE_URL)
+            
+            config["connections"]["default"] = {
+                "engine": "tortoise.backends.asyncpg",
+                "credentials": {
+                    "database": parsed.path[1:] if parsed.path else None,
+                    "host": parsed.hostname,
+                    "port": parsed.port or 5432,
+                    "user": parsed.username,
+                    "password": parsed.password,
+                    # Railway-optimized connection pool settings
+                    "minsize": 1,  # Minimum connections (Railway has connection limits)
+                    "maxsize": 5,  # Maximum connections (Railway free tier limit)
+                    "max_queries": 50000,  # Max queries per connection before recycling
+                    "max_inactive_connection_lifetime": 300,  # 5 minutes
+                    "connect_timeout": 60,
+                    "command_timeout": 30,
+                },
+            }
+            logger.info(f"Database pool configured: host={parsed.hostname}, max_connections=5")
+        else:
+            # Fallback for development
+            config["connections"]["default"] = settings.DATABASE_URL or "sqlite://db.sqlite3"
+
+        await Tortoise.init(config)
         await Tortoise.generate_schemas()
         
         # Run migrations after database initialization
         await run_migrations()
         
-        logger.info("Database connection established successfully")
+        logger.info("Database connection established successfully with optimized pooling")
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
         raise

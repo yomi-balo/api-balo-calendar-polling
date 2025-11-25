@@ -48,6 +48,7 @@ async def health_check():
             algolia_configured=algolia_service.is_configured(),
             cache_enabled=True,
             cache_size=cache.size(),
+            cache_stats=cache.get_stats(),
             app_version=settings.APP_VERSION,
             uptime_seconds=uptime,
             last_availability_update=last_update,
