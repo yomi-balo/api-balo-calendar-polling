@@ -2,7 +2,13 @@ from tortoise.models import Model
 from tortoise import fields
 from datetime import datetime, timezone
 import pytz
-from core.constants import ERROR_EMPTY_AVAILABILITY
+
+# Import constants with fallback for deployment environments
+try:
+    from core.constants import ERROR_EMPTY_AVAILABILITY
+except ImportError:
+    # Fallback constants if core.constants module isn't found
+    ERROR_EMPTY_AVAILABILITY = "Empty availability"
 
 
 class AvailabilityError(Model):

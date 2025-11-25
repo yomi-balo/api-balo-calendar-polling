@@ -10,7 +10,13 @@ from models.expert import Expert
 from schemas.availability import AvailabilityData, AvailabilityResult
 from core.retry_utils import with_retry
 from core.logging_utils import get_structured_logger
-from core.constants import ERROR_EMPTY_AVAILABILITY
+
+# Import constants with fallback for deployment environments
+try:
+    from core.constants import ERROR_EMPTY_AVAILABILITY
+except ImportError:
+    # Fallback constants if core.constants module isn't found
+    ERROR_EMPTY_AVAILABILITY = "Empty availability"
 
 logger = logging.getLogger(__name__)
 structured_logger = get_structured_logger(__name__)
