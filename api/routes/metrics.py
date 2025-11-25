@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 
 from core.performance import performance_monitor
 from core.cache import cache
-from schemas.availability import MetricsResponse
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 
