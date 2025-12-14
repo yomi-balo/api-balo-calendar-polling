@@ -1,11 +1,12 @@
 import asyncio
 import logging
+import httpx
 from typing import List
 from tortoise.transactions import in_transaction
 
 from models.expert import Expert
 from models.availability_error import AvailabilityError
-from services.cronofy_service import CronofyService
+from services.cronofy_service import CronofyService, CronofyAPIError
 from services.algolia_service import algolia_service
 from config.settings import settings
 from core.logging_utils import get_structured_logger
@@ -216,11 +217,12 @@ class ExpertService:
                     if batch_idx < len(expert_batches) - 1:
                         await asyncio.sleep(0.5)
 
-                except Exception as e:
+                except CronofyAPIError as e:
+                    # 4xx client errors from Cronofy API
                     logger.error(f"Failed to process batch {batch_idx + 1}: {str(e)}")
-                    
+
                     # If it's a 422 error, try processing experts individually as fallback
-                    if "422" in str(e):
+                    if e.status_code == 422:
                         logger.info(f"Attempting individual fallback for batch {batch_idx + 1} due to 422 error")
                         individual_success = 0
                         individual_failed = 0
@@ -294,16 +296,40 @@ class ExpertService:
                         total_processed += individual_success
                         total_failed += individual_failed
                     else:
-                        # Non-422 error, log error for all experts in batch
+                        # Non-422 client error (e.g., 401, 403), log error for all experts in batch
                         for expert in expert_batch:
                             await AvailabilityError.log_error(
                                 bubble_uid=expert.bubble_uid,
                                 expert_name=expert.expert_name,
                                 cronofy_id=expert.cronofy_id,
-                                error_reason="Batch processing error",
+                                error_reason=f"API error ({e.status_code})",
                                 error_details=f"Entire batch failed: {str(e)}"
                             )
                         total_failed += len(expert_batch)
+                except httpx.HTTPStatusError as e:
+                    # 5xx server errors (after retries exhausted)
+                    logger.error(f"Server error processing batch {batch_idx + 1}: {str(e)}")
+                    for expert in expert_batch:
+                        await AvailabilityError.log_error(
+                            bubble_uid=expert.bubble_uid,
+                            expert_name=expert.expert_name,
+                            cronofy_id=expert.cronofy_id,
+                            error_reason=f"Server error ({e.response.status_code})",
+                            error_details=f"Entire batch failed after retries: {str(e)}"
+                        )
+                    total_failed += len(expert_batch)
+                except Exception as e:
+                    # Non-HTTP errors (connection issues, timeouts, etc.)
+                    logger.error(f"Unexpected error processing batch {batch_idx + 1}: {str(e)}")
+                    for expert in expert_batch:
+                        await AvailabilityError.log_error(
+                            bubble_uid=expert.bubble_uid,
+                            expert_name=expert.expert_name,
+                            cronofy_id=expert.cronofy_id,
+                            error_reason="Batch processing error",
+                            error_details=f"Unexpected error: {type(e).__name__}: {str(e)}"
+                        )
+                    total_failed += len(expert_batch)
 
             # Update Algolia
             await algolia_service.update_expert_records(algolia_updates)

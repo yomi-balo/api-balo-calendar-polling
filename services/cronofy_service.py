@@ -22,6 +22,14 @@ logger = logging.getLogger(__name__)
 structured_logger = get_structured_logger(__name__)
 
 
+class CronofyAPIError(Exception):
+    """Custom exception for Cronofy API errors (4xx) that should not be retried"""
+    def __init__(self, message: str, status_code: int, response: httpx.Response):
+        super().__init__(message)
+        self.status_code = status_code
+        self.response = response
+
+
 class CronofyService:
     """Service for handling Cronofy API interactions"""
 
@@ -235,8 +243,8 @@ class CronofyService:
                     logger.error("=====================================")
                 
                 logger.error(f"Cronofy API error: {response.status_code} {response.reason_phrase}, {error_data}")
-                
-                # Raise specific HTTP error for retry mechanism
+
+                # For 5xx errors, raise HTTPStatusError which will be retried by @with_retry
                 if response.status_code >= 500:
                     raise httpx.HTTPStatusError(
                         f"Server error: {response.status_code} {response.reason_phrase}",
@@ -244,7 +252,12 @@ class CronofyService:
                         response=response
                     )
                 else:
-                    raise Exception(f"Cronofy API error: {response.status_code} {response.reason_phrase}")
+                    # 4xx errors - raise CronofyAPIError (not retried, but has status_code)
+                    raise CronofyAPIError(
+                        f"Client error: {response.status_code} {response.reason_phrase}",
+                        status_code=response.status_code,
+                        response=response
+                    )
 
             data = response.json()
 
@@ -323,6 +336,79 @@ class CronofyService:
         except Exception as e:
             logger.error(f"Error processing availability response: {str(e)}")
             return None
+
+    @staticmethod
+    def _get_error_details_for_status(
+            status_code: int,
+            experts: List[Expert],
+            original_error: str
+    ) -> tuple:
+        """Map HTTP status codes to user-friendly error messages"""
+        expert_info = f"Expert: {experts[0].expert_name if experts else 'Unknown'}, Cronofy ID: {experts[0].cronofy_id if experts else 'Unknown'}"
+
+        error_map = {
+            401: (
+                "Authentication error (401)",
+                f"""401 Unauthorized - Access token issue.
+
+Possible causes:
+1. Token expired or invalid
+2. Token doesn't have availability permissions
+3. Wrong API region (using AU endpoint)
+4. Token format issue
+
+Original error: {original_error}"""
+            ),
+            403: (
+                "Permission denied (403)",
+                f"""403 Forbidden - Permission denied.
+
+{expert_info}
+
+Likely causes:
+1. Token lacks permissions for this specific expert
+2. Expert revoked calendar access
+3. Calendar sharing permissions changed
+
+Original error: {original_error}"""
+            ),
+            422: (
+                "Invalid expert data (422)",
+                f"""422 Unprocessable Entity - Cronofy rejected the request.
+
+{expert_info}
+Calendar IDs: {experts[0].calendar_ids if experts else []}
+
+Common causes:
+1. Invalid cronofy_id (expert account deleted/revoked)
+2. Invalid calendar_ids (calendars don't exist or access revoked)
+3. Empty calendar_ids array
+4. Access token missing permissions for this expert
+5. Time period invalid (too far future, malformed dates)
+
+Original error: {original_error}"""
+            ),
+            429: (
+                "Rate limit exceeded (429)",
+                f"""429 Too Many Requests - API rate limit hit.
+
+Current batch size: {len(experts)} experts
+Rate limit exceeded for Cronofy API.
+
+Solution: Reduce request frequency or batch size.
+
+Original error: {original_error}"""
+            ),
+        }
+
+        if status_code in error_map:
+            return error_map[status_code]
+
+        # Default for other status codes
+        return (
+            f"API error ({status_code})",
+            f"HTTP {status_code} error from Cronofy API.\n\nOriginal error: {original_error}"
+        )
 
     @staticmethod
     async def fetch_experts_availability_batch(
@@ -443,69 +529,22 @@ Recommendation: Check expert's calendar directly or adjust search criteria."""
 
             return results
 
-        except Exception as e:
+        except CronofyAPIError as e:
+            # 4xx client errors (not retried)
+            status_code = e.status_code
             structured_logger.error(
-                "Error in batch availability fetch",
+                "Cronofy API client error in batch availability fetch",
                 error=str(e),
-                error_type=type(e).__name__,
+                status_code=status_code,
                 expert_count=len(experts),
                 expert_cronofy_ids=[expert.cronofy_id for expert in experts]
             )
-            # Return error results for all experts on API error
-            error_reason = "API error"
-            error_details = f"{type(e).__name__}: {str(e)}"
-            
-            # Provide more specific error reasons for common cases
-            if "422" in str(e):
-                error_reason = "Invalid expert data (422)"
-                expert_info = f"Expert: {experts[0].expert_name if experts else 'Unknown'}, Cronofy ID: {experts[0].cronofy_id if experts else 'Unknown'}, Calendar IDs: {experts[0].calendar_ids if experts else []}"
-                error_details = f"""422 Unprocessable Entity - Cronofy rejected the request.
 
-{expert_info}
+            # Map status codes to specific error reasons
+            error_reason, error_details = CronofyService._get_error_details_for_status(
+                status_code, experts, str(e)
+            )
 
-Common causes:
-1. Invalid cronofy_id (expert account deleted/revoked)
-2. Invalid calendar_ids (calendars don't exist or access revoked)  
-3. Empty calendar_ids array
-4. Access token missing permissions for this expert
-5. Time period invalid (too far future, malformed dates)
-
-Original error: {str(e)}"""
-            elif "401" in str(e):
-                error_reason = "Authentication error (401)" 
-                error_details = f"""401 Unauthorized - Access token issue.
-
-Possible causes:
-1. Token expired or invalid
-2. Token doesn't have availability permissions
-3. Wrong API region (using AU endpoint)
-4. Token format issue
-
-Original error: {str(e)}"""
-            elif "403" in str(e):
-                error_reason = "Permission denied (403)"
-                error_details = f"""403 Forbidden - Permission denied.
-
-Expert: {experts[0].expert_name if experts else 'Unknown'}
-Cronofy ID: {experts[0].cronofy_id if experts else 'Unknown'}
-
-Likely causes:
-1. Token lacks permissions for this specific expert
-2. Expert revoked calendar access
-3. Calendar sharing permissions changed
-
-Original error: {str(e)}"""
-            elif "429" in str(e):
-                error_reason = "Rate limit exceeded (429)"
-                error_details = f"""429 Too Many Requests - API rate limit hit.
-
-Current batch size: {len(experts)} experts
-Rate limit exceeded for Cronofy API.
-
-Solution: Reduce request frequency or batch size.
-
-Original error: {str(e)}"""
-            
             return [
                 AvailabilityResult(
                     expert_id=expert.cronofy_id,
@@ -514,6 +553,53 @@ Original error: {str(e)}"""
                     success=False,
                     error_reason=error_reason,
                     error_details=error_details
+                )
+                for expert in experts
+            ]
+        except httpx.HTTPStatusError as e:
+            # 5xx server errors (after retries exhausted)
+            status_code = e.response.status_code
+            structured_logger.error(
+                "HTTP server error in batch availability fetch",
+                error=str(e),
+                status_code=status_code,
+                expert_count=len(experts),
+                expert_cronofy_ids=[expert.cronofy_id for expert in experts]
+            )
+
+            # Map status codes to specific error reasons
+            error_reason, error_details = CronofyService._get_error_details_for_status(
+                status_code, experts, str(e)
+            )
+
+            return [
+                AvailabilityResult(
+                    expert_id=expert.cronofy_id,
+                    bubble_uid=expert.bubble_uid,
+                    expert_name=expert.expert_name,
+                    success=False,
+                    error_reason=error_reason,
+                    error_details=error_details
+                )
+                for expert in experts
+            ]
+        except Exception as e:
+            structured_logger.error(
+                "Unexpected error in batch availability fetch",
+                error=str(e),
+                error_type=type(e).__name__,
+                expert_count=len(experts),
+                expert_cronofy_ids=[expert.cronofy_id for expert in experts]
+            )
+
+            return [
+                AvailabilityResult(
+                    expert_id=expert.cronofy_id,
+                    bubble_uid=expert.bubble_uid,
+                    expert_name=expert.expert_name,
+                    success=False,
+                    error_reason="Unexpected error",
+                    error_details=f"{type(e).__name__}: {str(e)}"
                 )
                 for expert in experts
             ]
