@@ -52,7 +52,7 @@ class AlgoliaService:
             ]
 
             for batch in algolia_batches:
-                self.index.partial_update_objects(batch)
+                self.index.partial_update_objects(batch, {"createIfNotExists": True})
 
             logger.info(f"Successfully updated {len(records)} expert records in Algolia")
             return True
